@@ -1,6 +1,6 @@
 import { FrontendShell } from "@/components/frontend-shell";
 
-export default function FamilyTreeLayout({
+export default function MeLayout({
   children,
 }: {
   children: React.ReactNode;

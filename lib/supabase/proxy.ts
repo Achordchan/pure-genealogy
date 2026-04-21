@@ -1,7 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
-import { getAccountHomePath, type AccountProfile } from "@/lib/account/shared";
+import {
+  canManageAccounts,
+  canManageFamilyMembers,
+  canReviewMemberChanges,
+  getAccountHomePath,
+  type AccountProfile,
+} from "@/lib/account/shared";
 
 const AUTH_ROUTES = new Set([
   "/auth/login",
@@ -10,7 +16,12 @@ const AUTH_ROUTES = new Set([
 ]);
 
 function isProtectedRoute(pathname: string) {
-  return pathname.startsWith("/family-tree") || pathname.startsWith("/admin");
+  return (
+    pathname.startsWith("/family-tree") ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/review") ||
+    pathname.startsWith("/me")
+  );
 }
 
 export async function updateSession(request: NextRequest) {
@@ -71,9 +82,9 @@ export async function updateSession(request: NextRequest) {
 
   const { data: profile, error: profileError } = await supabase
     .from("account_profiles")
-    .select("auth_user_id, real_name, status, is_admin")
+    .select("auth_user_id, real_name, status, role, member_id")
     .eq("auth_user_id", user.sub)
-    .maybeSingle<Pick<AccountProfile, "auth_user_id" | "real_name" | "status" | "is_admin">>();
+    .maybeSingle<Pick<AccountProfile, "auth_user_id" | "real_name" | "status" | "role" | "member_id">>();
 
   if (profileError || !profile) {
     const url = request.nextUrl.clone();
@@ -95,7 +106,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (!profile.is_admin && profile.status !== "approved") {
+  if (profile.status !== "approved") {
     if (pathname !== "/auth/pending") {
       const url = request.nextUrl.clone();
       url.pathname = "/auth/pending";
@@ -111,7 +122,19 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (pathname.startsWith("/admin") && !profile.is_admin) {
+  if (pathname === "/family-tree" && !canManageFamilyMembers(profile)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/family-tree/graph";
+    return NextResponse.redirect(url);
+  }
+
+  if (pathname.startsWith("/admin") && !canManageAccounts(profile)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/family-tree/graph";
+    return NextResponse.redirect(url);
+  }
+
+  if (pathname.startsWith("/review") && !canReviewMemberChanges(profile)) {
     const url = request.nextUrl.clone();
     url.pathname = "/family-tree/graph";
     return NextResponse.redirect(url);

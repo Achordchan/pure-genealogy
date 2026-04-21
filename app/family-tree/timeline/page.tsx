@@ -1,8 +1,10 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { fetchMembersForTimeline } from "../actions";
 import { TimelineClient } from "./timeline-client";
 
 async function TimelineWrapper() {
+  await connection();
   const members = await fetchMembersForTimeline();
   return <TimelineClient initialData={members} />;
 }

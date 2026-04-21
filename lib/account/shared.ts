@@ -1,8 +1,19 @@
 import { createHash } from "crypto";
 
 export const ACCOUNT_STATUSES = ["pending", "approved", "rejected"] as const;
+export const ACCOUNT_ROLES = ["admin", "editor", "member"] as const;
+export const DRAFT_EDITABLE_FIELDS = [
+  "spouse",
+  "birthday",
+  "death_date",
+  "residence_place",
+  "official_position",
+  "remarks",
+] as const;
 
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+export type AccountRole = (typeof ACCOUNT_ROLES)[number];
+export type DraftEditableField = (typeof DRAFT_EDITABLE_FIELDS)[number];
 
 export interface AccountProfile {
   id: string;
@@ -13,9 +24,23 @@ export interface AccountProfile {
   id_card_masked: string;
   phone: string | null;
   status: AccountStatus;
-  is_admin: boolean;
+  role: AccountRole;
+  member_id: number | null;
   approved_at: string | null;
   approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemberChangeRequest {
+  id: string;
+  account_profile_id: string;
+  member_id: number;
+  payload: Partial<Record<DraftEditableField, string | null>>;
+  status: AccountStatus;
+  review_comment: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -27,8 +52,7 @@ export function normalizeRealName(value: string) {
 }
 
 export function normalizeIdCard(value: string) {
-  const compact = value.trim().replace(/\s+/gu, "").toUpperCase();
-  return compact.replace(/X$/u, "X");
+  return value.trim().replace(/\s+/gu, "").toUpperCase();
 }
 
 export function validateRealName(value: string) {
@@ -90,12 +114,52 @@ export function getInitialAdminHashes() {
   );
 }
 
-export function getAccountHomePath(profile: Pick<AccountProfile, "status" | "is_admin">) {
-  if (profile.is_admin || profile.status === "approved") {
-    return "/family-tree/graph";
+export function isApprovedAccount(profile: Pick<AccountProfile, "status">) {
+  return profile.status === "approved";
+}
+
+export function isAdminRole(profile: Pick<AccountProfile, "role">) {
+  return profile.role === "admin";
+}
+
+export function isEditorRole(profile: Pick<AccountProfile, "role">) {
+  return profile.role === "editor";
+}
+
+export function canManageAccounts(profile: Pick<AccountProfile, "role" | "status">) {
+  return isApprovedAccount(profile) && isAdminRole(profile);
+}
+
+export function canManageFamilyMembers(profile: Pick<AccountProfile, "role" | "status">) {
+  return isApprovedAccount(profile) && (isAdminRole(profile) || isEditorRole(profile));
+}
+
+export function canDeleteFamilyMembers(profile: Pick<AccountProfile, "role" | "status">) {
+  return isApprovedAccount(profile) && isAdminRole(profile);
+}
+
+export function canImportFamilyMembers(profile: Pick<AccountProfile, "role" | "status">) {
+  return canDeleteFamilyMembers(profile);
+}
+
+export function canReviewMemberChanges(profile: Pick<AccountProfile, "role" | "status">) {
+  return isApprovedAccount(profile) && (isAdminRole(profile) || isEditorRole(profile));
+}
+
+export function canSubmitOwnDraft(profile: Pick<AccountProfile, "role" | "status" | "member_id">) {
+  return isApprovedAccount(profile) && profile.role === "member" && profile.member_id !== null;
+}
+
+export function canViewMaintenancePage(profile: Pick<AccountProfile, "role" | "status">) {
+  return canManageFamilyMembers(profile);
+}
+
+export function getAccountHomePath(profile: Pick<AccountProfile, "status">) {
+  if (!isApprovedAccount(profile)) {
+    return "/auth/pending";
   }
 
-  return "/auth/pending";
+  return "/family-tree/graph";
 }
 
 export function getPendingStatusText(status: AccountStatus) {
@@ -104,4 +168,25 @@ export function getPendingStatusText(status: AccountStatus) {
   }
 
   return "身份信息已提交，管理员审核通过后即可进入族谱系统。";
+}
+
+export function normalizeAccountRole(value: string | null | undefined): AccountRole | null {
+  if (value === "admin" || value === "editor" || value === "member") {
+    return value;
+  }
+
+  return null;
+}
+
+export function sanitizeDraftPayload(
+  payload: Record<string, FormDataEntryValue | string | null | undefined>,
+) {
+  const sanitized: Partial<Record<DraftEditableField, string | null>> = {};
+
+  DRAFT_EDITABLE_FIELDS.forEach((field) => {
+    const value = payload[field];
+    sanitized[field] = typeof value === "string" ? value.trim() || null : null;
+  });
+
+  return sanitized;
 }

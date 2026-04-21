@@ -1,9 +1,10 @@
 import React, { Suspense } from "react";
 import { StatisticsContent } from "./statistics-content";
+import { FAMILY_SURNAME } from "@/lib/utils";
 
 export const metadata = {
-  title: "家族统计分析",
-  description: "家族成员数据统计仪表盘",
+  title: `${FAMILY_SURNAME}氏统计分析`,
+  description: `${FAMILY_SURNAME}氏家族成员数据统计仪表盘`,
 };
 
 export default function StatisticsPage() {

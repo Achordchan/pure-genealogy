@@ -84,62 +84,26 @@ NEXT_PUBLIC_SUPABASE_URL=你的_Supabase_项目_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=你的_Supabase_Anon_Key
 ACCOUNT_ID_HASH_SALT=你自定义的一串高强度随机字符
 INITIAL_ADMIN_ID_HASHES=管理员身份证哈希1,管理员身份证哈希2
+NEXT_PUBLIC_FAMILY_SURNAME=陈
 ```
 
 `INITIAL_ADMIN_ID_HASHES` 的值需要按“规范化身份证号 -> SHA-256”得到哈希后填写，规范化规则为：去掉空格、末尾 `x` 转成大写 `X`。项目运行时会再叠加 `ACCOUNT_ID_HASH_SALT` 做正式哈希。
 
 ### 4. 初始化数据库
 
-在 Supabase 项目的 SQL Editor 中执行 [supabase/init.sql](./supabase/init.sql) 中的脚本，或直接执行以下 SQL：
+在 Supabase 项目的 SQL Editor 中执行 [supabase/init.sql](./supabase/init.sql) 中的完整脚本。这个脚本会一次性完成下面这些内容：
 
-```sql
-create extension if not exists pgcrypto;
-
-create table if not exists account_profiles (
-    id uuid primary key default gen_random_uuid(),
-    auth_user_id uuid not null unique references auth.users(id) on delete cascade,
-    real_name text not null,
-    real_name_normalized text not null,
-    id_card_hash text not null unique,
-    id_card_masked text not null,
-    phone text,
-    status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
-    is_admin boolean not null default false,
-    approved_at timestamptz,
-    approved_by uuid references auth.users(id),
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_account_profiles_auth_user_id
-    on account_profiles(auth_user_id);
-
-create index if not exists idx_account_profiles_status_created_at
-    on account_profiles(status, created_at);
-
-create table if not exists family_members (
-    id bigint generated always as identity primary key,
-    name text not null,
-    generation integer,
-    sibling_order integer,
-    father_id bigint references family_members(id),
-    gender text check (gender in ('男', '女')),
-    official_position text,
-    is_alive boolean default true,
-    spouse text,
-    remarks text,
-    birthday date,
-    death_date date,
-    residence_place text,
-    updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_family_members_father_id
-    on family_members(father_id);
-
-create index if not exists idx_family_members_name
-    on family_members(name);
-```
+- `family_members` 主表
+- `account_profiles` 账号资料表
+  - `role = admin | editor | member`
+  - `status = pending | approved | rejected`
+  - `member_id` 用来绑定唯一的族谱成员
+- `member_change_requests` 普通用户资料草稿表
+- `RLS = 行级权限控制`
+  - 普通用户只能读自己的账号资料、提交自己的资料草稿
+  - 编辑员可以新增和修改族谱成员，但不能删除
+  - 管理员可以审核账号、分配角色、绑定成员、删除成员
+- `app_current_role()` / `app_is_admin()` / `app_is_editor()` / `app_bound_member_id()` 等数据库辅助函数
 
 ### 5. 启动开发服务器
 
@@ -147,7 +111,27 @@ create index if not exists idx_family_members_name
 npm run dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000) 开始使用。首批管理员需要先在环境变量中配置身份证哈希白名单，普通用户注册后会停留在“信息正在审核中”页面，等待管理员在 `/admin/accounts` 审核。
+访问 [http://localhost:3000](http://localhost:3000) 开始使用。首批管理员需要先在环境变量中配置身份证哈希白名单；普通用户注册后会停留在“信息正在审核中”页面，等待管理员在 `/admin/accounts` 审核，并在审核时绑定对应的族谱成员。
+
+## 🔐 权限模型
+
+- `admin`
+  - 账号审核、账号管理、角色分配、成员绑定
+  - 族谱成员增删改查、批量导入
+  - 草稿审核
+- `editor`
+  - 族谱成员新增和修改
+  - 草稿审核
+- `member`
+  - 查看 2D/3D 族谱、时间轴、统计分析、生平册
+  - 查看自己的资料
+  - 提交自己的资料草稿，等待审核
+
+账号批准规则：
+
+- 白名单管理员注册后直接成为 `approved + admin`
+- 普通账号注册后默认为 `pending + member`
+- 管理员批准普通账号时，必须同时选择 `role` 和 `member_id`
 
 ## 📂 项目结构
 
@@ -155,6 +139,7 @@ npm run dev
 /
 ├── app/                  # Next.js App Router 核心目录
 │   ├── auth/             # 认证流程页面
+│   ├── admin/            # 管理员账号审核与账号管理
 │   ├── family-tree/      # 族谱主要功能区
 │   │   ├── graph/        # 2D 视图 (React Flow)
 │   │   ├── graph-3d/     # 3D 视图 (Force Graph)
@@ -162,6 +147,8 @@ npm run dev
 │   │   ├── timeline/     # 时间轴
 │   │   ├── biography-book/ # 传记书模式
 │   │   └── page.tsx      # 成员列表
+│   ├── me/               # 我的资料与我的草稿
+│   ├── review/           # 草稿审核
 │   └── ...
 ├── components/           # React 组件
 │   ├── ui/               # shadcn/ui 基础组件

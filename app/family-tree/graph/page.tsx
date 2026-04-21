@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { fetchAllFamilyMembers } from "./actions";
 import { FamilyTreeGraph } from "./family-tree-graph";
 import Link from "next/link";
@@ -15,6 +16,7 @@ function GraphSkeleton() {
 }
 
 async function GraphLoader() {
+  await connection();
   const { data, error } = await fetchAllFamilyMembers();
   const profile = await getCurrentAccountProfile();
 

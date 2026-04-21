@@ -1,5 +1,7 @@
 import { fetchFamilyMembers } from "./actions";
 import { FamilyMembersTable } from "./family-members-table";
+import { getCurrentAccountProfile } from "@/lib/account/server";
+import { canDeleteFamilyMembers, canImportFamilyMembers } from "@/lib/account/shared";
 
 interface FamilyMembersLoaderProps {
   page: number;
@@ -13,6 +15,7 @@ export async function FamilyMembersLoader({
   search,
 }: FamilyMembersLoaderProps) {
   const { data, count, error } = await fetchFamilyMembers(page, pageSize, search);
+  const profile = await getCurrentAccountProfile();
 
   if (error) {
     return (
@@ -29,6 +32,8 @@ export async function FamilyMembersLoader({
       currentPage={page}
       pageSize={pageSize}
       searchQuery={search}
+      canDelete={profile ? canDeleteFamilyMembers(profile) : false}
+      canImport={profile ? canImportFamilyMembers(profile) : false}
     />
   );
 }

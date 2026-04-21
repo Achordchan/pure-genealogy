@@ -1,17 +1,20 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { fetchAllFamilyMembers } from "../graph/actions";
 import { FamilyForceGraph } from "./force-graph";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard } from "lucide-react";
+import { FAMILY_SURNAME } from "@/lib/utils";
 
 export const metadata: Metadata = {
-  title: "族谱关系图 (3D) | Liu Family",
-  description: "三维视角的家族族谱关系图",
+  title: `族谱关系图 (3D) | ${FAMILY_SURNAME}氏`,
+  description: `${FAMILY_SURNAME}氏三维家族关系图`,
 };
 
 async function Graph3DLoader() {
+  await connection();
   const { data, error } = await fetchAllFamilyMembers();
 
   if (error) {

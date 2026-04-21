@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { fetchMembersWithBiography } from "./actions";
 import { BiographyBookLoader } from "./biography-book-loader";
 import { FAMILY_SURNAME } from "@/lib/utils";
@@ -9,6 +10,7 @@ export const metadata = {
 };
 
 async function BookContent() {
+    await connection();
     const { data: members, error } = await fetchMembersWithBiography();
 
     if (error) {

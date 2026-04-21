@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ async function PendingContent({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
+  await connection();
   const profile = await getCurrentPendingProfile();
   const params = await searchParams;
 
@@ -21,7 +23,7 @@ async function PendingContent({
     redirect("/auth/login");
   }
 
-  if (profile.is_admin || profile.status === "approved") {
+  if (profile.status === "approved") {
     redirect(getAccountHomePath(profile));
   }
 

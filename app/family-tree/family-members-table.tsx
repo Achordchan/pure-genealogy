@@ -50,6 +50,8 @@ interface FamilyMembersTableProps {
   currentPage: number;
   pageSize: number;
   searchQuery: string;
+  canDelete: boolean;
+  canImport: boolean;
 }
 
 export function FamilyMembersTable({
@@ -58,6 +60,8 @@ export function FamilyMembersTable({
   currentPage,
   pageSize,
   searchQuery,
+  canDelete,
+  canImport,
 }: FamilyMembersTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -263,7 +267,7 @@ export function FamilyMembersTable({
   };
 
   const allSelected =
-    initialData.length > 0 && selectedIds.size === initialData.length;
+    canDelete && initialData.length > 0 && selectedIds.size === initialData.length;
 
   return (
     <div className="space-y-4">
@@ -284,21 +288,23 @@ export function FamilyMembersTable({
 
         {/* 操作按钮 */}
         <div className="flex gap-2 flex-wrap w-full lg:w-auto">
-          <ImportMembersDialog onSuccess={() => router.refresh()} />
+            {canImport && <ImportMembersDialog onSuccess={() => router.refresh()} />}
           
           <Button onClick={handleOpenAddDialog}>
             <Plus className="h-4 w-4 mr-2" />
             新增
           </Button>
 
-          <Button
-            variant="destructive"
-            onClick={handleDelete}
-            disabled={selectedIds.size === 0 || isDeleting}
-          >
-            {isDeleting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
-            删除 {selectedIds.size > 0 && `(${selectedIds.size})`}
-          </Button>
+          {canDelete && (
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={selectedIds.size === 0 || isDeleting}
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              删除 {selectedIds.size > 0 && `(${selectedIds.size})`}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -561,13 +567,15 @@ export function FamilyMembersTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12">
-                <Checkbox
-                  checked={allSelected}
-                  onCheckedChange={handleSelectAll}
-                  aria-label="全选"
-                />
-              </TableHead>
+              {canDelete && (
+                <TableHead className="w-12">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={handleSelectAll}
+                    aria-label="全选"
+                  />
+                </TableHead>
+              )}
               <TableHead className="w-16">ID</TableHead>
               <TableHead>姓名</TableHead>
               <TableHead className="w-20">世代</TableHead>
@@ -587,7 +595,7 @@ export function FamilyMembersTable({
           <TableBody>
             {initialData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={14} className="h-24 text-center">
+                <TableCell colSpan={canDelete ? 15 : 14} className="h-24 text-center">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -597,15 +605,17 @@ export function FamilyMembersTable({
                   key={member.id}
                   data-state={selectedIds.has(member.id) ? "selected" : undefined}
                 >
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedIds.has(member.id)}
-                      onCheckedChange={(checked) =>
-                        handleSelectOne(member.id, checked as boolean)
-                      }
-                      aria-label={`选择 ${member.name}`}
-                    />
-                  </TableCell>
+                  {canDelete && (
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(member.id)}
+                        onCheckedChange={(checked) =>
+                          handleSelectOne(member.id, checked as boolean)
+                        }
+                        aria-label={`选择 ${member.name}`}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-mono">{member.id}</TableCell>
                   <TableCell className="font-medium">
                     <button

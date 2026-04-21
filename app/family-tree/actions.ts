@@ -1,7 +1,11 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireApprovedAccount } from "@/lib/account/server";
+import {
+  assertRoleCanDelete,
+  requireApprovedAccount,
+  requireEditorAccount,
+} from "@/lib/account/server";
 import { revalidatePath } from "next/cache";
 
 export interface FamilyMember {
@@ -34,7 +38,7 @@ export async function fetchFamilyMembers(
   searchQuery: string = ""
 ): Promise<FetchMembersResult> {
   try {
-    await requireApprovedAccount();
+    await requireEditorAccount();
   } catch (error) {
     return {
       data: [],
@@ -111,7 +115,7 @@ export async function createFamilyMember(
   input: CreateMemberInput
 ): Promise<{ success: boolean; error: string | null }> {
   try {
-    await requireApprovedAccount();
+    await requireEditorAccount();
   } catch (error) {
     return {
       success: false,
@@ -152,7 +156,8 @@ export async function deleteFamilyMembers(
   }
 
   try {
-    await requireApprovedAccount();
+    const account = await requireEditorAccount();
+    assertRoleCanDelete(account.profile);
   } catch (error) {
     return {
       success: false,
@@ -180,7 +185,7 @@ export async function fetchAllMembersForSelect(): Promise<
   { id: number; name: string; generation: number | null }[]
 > {
   try {
-    await requireApprovedAccount();
+    await requireEditorAccount();
   } catch {
     return [];
   }
@@ -210,7 +215,7 @@ export async function fetchMemberById(
   id: number
 ): Promise<FamilyMember | null> {
   try {
-    await requireApprovedAccount();
+    await requireEditorAccount();
   } catch {
     return null;
   }
@@ -249,7 +254,7 @@ export async function updateFamilyMember(
   input: UpdateMemberInput
 ): Promise<{ success: boolean; error: string | null }> {
   try {
-    await requireApprovedAccount();
+    await requireEditorAccount();
   } catch (error) {
     return {
       success: false,
@@ -304,7 +309,8 @@ export async function batchCreateFamilyMembers(
   members: ImportMemberInput[]
 ): Promise<{ success: boolean; count: number; error: string | null }> {
   try {
-    await requireApprovedAccount();
+    const account = await requireEditorAccount();
+    assertRoleCanDelete(account.profile);
   } catch (error) {
     return {
       success: false,

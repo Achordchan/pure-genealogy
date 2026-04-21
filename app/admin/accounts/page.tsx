@@ -1,9 +1,20 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { approveAccountAction, getPendingAccountsForAdmin, rejectAccountAction } from "@/app/auth/actions";
-import { getCurrentAccountProfile } from "@/lib/account/server";
+import { connection } from "next/server";
+import {
+  approveAccountAction,
+  getMemberOptionsForAdmin,
+  getPendingAccountsForAdmin,
+  rejectAccountAction,
+} from "@/app/auth/actions";
+import {
+  getBackofficeNavItems,
+  getBackofficeNoticeCounts,
+  getCurrentAccountProfile,
+} from "@/lib/account/server";
+import { canManageAccounts } from "@/lib/account/shared";
 import { Badge } from "@/components/ui/badge";
+import { BackendPageHeader } from "@/components/backend-page-header";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -19,6 +30,7 @@ async function AccountsContent({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
+  await connection();
   const profile = await getCurrentAccountProfile();
   const params = await searchParams;
 
@@ -26,25 +38,24 @@ async function AccountsContent({
     redirect("/auth/login");
   }
 
-  if (!profile.is_admin) {
+  if (!canManageAccounts(profile)) {
     redirect("/family-tree/graph");
   }
 
-  const pendingAccounts = await getPendingAccountsForAdmin();
+  const [pendingAccounts, memberOptions] = await Promise.all([
+    getPendingAccountsForAdmin(),
+    getMemberOptionsForAdmin(),
+  ]);
+  const noticeCounts = await getBackofficeNoticeCounts(profile);
+  const items = getBackofficeNavItems(profile, noticeCounts);
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">账号审核</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            当前管理员：{profile.real_name}
-          </p>
-        </div>
-        <Button asChild variant="outline">
-          <Link href="/family-tree/graph">返回族谱</Link>
-        </Button>
-      </div>
+      <BackendPageHeader
+        title="账号审核"
+        description="这里处理新注册账号的审核、角色选择和成员绑定。"
+        items={items}
+      />
 
       {params.error && <p className="text-sm text-red-500">{decodeURIComponent(params.error)}</p>}
       {params.success && <p className="text-sm text-emerald-600">{decodeURIComponent(params.success)}</p>}
@@ -58,13 +69,15 @@ async function AccountsContent({
               <TableHead>手机号</TableHead>
               <TableHead>注册时间</TableHead>
               <TableHead>状态</TableHead>
+              <TableHead>批准角色</TableHead>
+              <TableHead>绑定成员</TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pendingAccounts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                   当前没有待审核账号
                 </TableCell>
               </TableRow>
@@ -82,9 +95,35 @@ async function AccountsContent({
                   <TableCell>
                     <Badge variant="secondary">待审核</Badge>
                   </TableCell>
+                  <TableCell>
+                    <select
+                      form={`approve-${account.id}`}
+                      name="role"
+                      defaultValue="member"
+                      className="h-9 rounded-md border bg-background px-3 text-sm"
+                    >
+                      <option value="member">普通用户</option>
+                      <option value="editor">编辑员</option>
+                    </select>
+                  </TableCell>
+                  <TableCell>
+                    <select
+                      form={`approve-${account.id}`}
+                      name="memberId"
+                      defaultValue=""
+                      className="h-9 min-w-[220px] rounded-md border bg-background px-3 text-sm"
+                    >
+                      <option value="">请选择绑定成员</option>
+                      {memberOptions.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.generation ? `第${member.generation}世 ` : ""}{member.name}
+                        </option>
+                      ))}
+                    </select>
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <form action={approveAccountAction}>
+                      <form id={`approve-${account.id}`} action={approveAccountAction}>
                         <input type="hidden" name="accountId" value={account.id} />
                         <Button type="submit" size="sm">
                           批准

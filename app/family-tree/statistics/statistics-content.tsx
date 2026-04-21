@@ -1,10 +1,12 @@
 import React from "react";
+import { connection } from "next/server";
 import { fetchFamilyStatistics } from "./actions";
 import { StatisticsCharts } from "./charts";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 
 export async function StatisticsContent() {
+  await connection();
   const { data, error } = await fetchFamilyStatistics();
 
   if (error) {
