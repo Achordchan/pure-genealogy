@@ -56,7 +56,7 @@
 - **时间轴 (`/family-tree/timeline`)**: 横向时间轴展示家族历史跨度。
 
 ### 3. 系统功能
-- **安全认证**: 完整的注册、登录、密码重置流程 (Supabase Auth)，登录页采用水墨山水风格。
+- **身份认证**: 使用“姓名 + 身份证号”注册登录。系统仍通过 Supabase Auth 维护会话，但前台不再使用邮箱登录；新账号默认进入待审核状态。
 - **实时同步**: 多端数据实时更新。
 - **响应式设计**: 完美适配桌面端与移动端，针对移动端优化了导航和工具栏布局，支持明暗主题切换。
 
@@ -82,33 +82,63 @@ npm install
 ```env
 NEXT_PUBLIC_SUPABASE_URL=你的_Supabase_项目_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=你的_Supabase_Anon_Key
+ACCOUNT_ID_HASH_SALT=你自定义的一串高强度随机字符
+INITIAL_ADMIN_ID_HASHES=管理员身份证哈希1,管理员身份证哈希2
 ```
+
+`INITIAL_ADMIN_ID_HASHES` 的值需要按“规范化身份证号 -> SHA-256”得到哈希后填写，规范化规则为：去掉空格、末尾 `x` 转成大写 `X`。项目运行时会再叠加 `ACCOUNT_ID_HASH_SALT` 做正式哈希。
 
 ### 4. 初始化数据库
 
-在 Supabase 项目的 SQL Editor 中执行以下脚本以创建核心表：
+在 Supabase 项目的 SQL Editor 中执行 [supabase/init.sql](./supabase/init.sql) 中的脚本，或直接执行以下 SQL：
 
 ```sql
-CREATE TABLE family_members (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name text NOT NULL,
+create extension if not exists pgcrypto;
+
+create table if not exists account_profiles (
+    id uuid primary key default gen_random_uuid(),
+    auth_user_id uuid not null unique references auth.users(id) on delete cascade,
+    real_name text not null,
+    real_name_normalized text not null,
+    id_card_hash text not null unique,
+    id_card_masked text not null,
+    phone text,
+    status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+    is_admin boolean not null default false,
+    approved_at timestamptz,
+    approved_by uuid references auth.users(id),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_account_profiles_auth_user_id
+    on account_profiles(auth_user_id);
+
+create index if not exists idx_account_profiles_status_created_at
+    on account_profiles(status, created_at);
+
+create table if not exists family_members (
+    id bigint generated always as identity primary key,
+    name text not null,
     generation integer,
     sibling_order integer,
-    father_id bigint REFERENCES family_members(id),
-    gender text CHECK (gender IN ('男', '女')),
+    father_id bigint references family_members(id),
+    gender text check (gender in ('男', '女')),
     official_position text,
-    is_alive boolean DEFAULT true,
+    is_alive boolean default true,
     spouse text,
-    remarks text, -- 存储 Slate.js 富文本 JSON 数据
+    remarks text,
     birthday date,
     death_date date,
     residence_place text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamptz not null default now()
 );
 
--- 创建索引优化查询
-CREATE INDEX idx_family_members_father_id ON family_members(father_id);
-CREATE INDEX idx_family_members_name ON family_members(name);
+create index if not exists idx_family_members_father_id
+    on family_members(father_id);
+
+create index if not exists idx_family_members_name
+    on family_members(name);
 ```
 
 ### 5. 启动开发服务器
@@ -117,7 +147,7 @@ CREATE INDEX idx_family_members_name ON family_members(name);
 npm run dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000) 开始使用。
+访问 [http://localhost:3000](http://localhost:3000) 开始使用。首批管理员需要先在环境变量中配置身份证哈希白名单，普通用户注册后会停留在“信息正在审核中”页面，等待管理员在 `/admin/accounts` 审核。
 
 ## 📂 项目结构
 

@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { requireApprovedAccount } from "@/lib/account/server";
 import { revalidatePath } from "next/cache";
 
 export interface FamilyMember {
@@ -32,6 +33,16 @@ export async function fetchFamilyMembers(
   pageSize: number = 50,
   searchQuery: string = ""
 ): Promise<FetchMembersResult> {
+  try {
+    await requireApprovedAccount();
+  } catch (error) {
+    return {
+      data: [],
+      count: 0,
+      error: error instanceof Error ? error.message : "当前账号无权访问",
+    };
+  }
+
   const supabase = await createClient();
 
   const from = (page - 1) * pageSize;
@@ -99,6 +110,15 @@ export interface CreateMemberInput {
 export async function createFamilyMember(
   input: CreateMemberInput
 ): Promise<{ success: boolean; error: string | null }> {
+  try {
+    await requireApprovedAccount();
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "当前账号无权操作",
+    };
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase.from("family_members").insert({
@@ -131,6 +151,15 @@ export async function deleteFamilyMembers(
     return { success: false, error: "没有选择要删除的成员" };
   }
 
+  try {
+    await requireApprovedAccount();
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "当前账号无权操作",
+    };
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -150,6 +179,12 @@ export async function deleteFamilyMembers(
 export async function fetchAllMembersForSelect(): Promise<
   { id: number; name: string; generation: number | null }[]
 > {
+  try {
+    await requireApprovedAccount();
+  } catch {
+    return [];
+  }
+
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -174,6 +209,12 @@ export interface UpdateMemberInput extends CreateMemberInput {
 export async function fetchMemberById(
   id: number
 ): Promise<FamilyMember | null> {
+  try {
+    await requireApprovedAccount();
+  } catch {
+    return null;
+  }
+
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -207,6 +248,15 @@ export async function fetchMemberById(
 export async function updateFamilyMember(
   input: UpdateMemberInput
 ): Promise<{ success: boolean; error: string | null }> {
+  try {
+    await requireApprovedAccount();
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "当前账号无权操作",
+    };
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -253,6 +303,16 @@ export interface ImportMemberInput {
 export async function batchCreateFamilyMembers(
   members: ImportMemberInput[]
 ): Promise<{ success: boolean; count: number; error: string | null }> {
+  try {
+    await requireApprovedAccount();
+  } catch (error) {
+    return {
+      success: false,
+      count: 0,
+      error: error instanceof Error ? error.message : "当前账号无权操作",
+    };
+  }
+
   const supabase = await createClient();
 
   // 1. 提取所有不为空的父亲姓名
@@ -317,6 +377,12 @@ export async function batchCreateFamilyMembers(
 export async function fetchMembersForTimeline(): Promise<
   { id: number; name: string; birthday: string | null; death_date: string | null; generation: number | null }[]
 > {
+  try {
+    await requireApprovedAccount();
+  } catch {
+    return [];
+  }
+
   const supabase = await createClient();
 
   const { data, error } = await supabase

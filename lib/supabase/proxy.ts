@@ -1,6 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
+import { getAccountHomePath, type AccountProfile } from "@/lib/account/shared";
+
+const AUTH_ROUTES = new Set([
+  "/auth/login",
+  "/auth/sign-up",
+  "/auth/pending",
+]);
+
+function isProtectedRoute(pathname: string) {
+  return pathname.startsWith("/family-tree") || pathname.startsWith("/admin");
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -46,17 +57,63 @@ export async function updateSession(request: NextRequest) {
   // with the Supabase client, your users may be randomly logged out.
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
+  const pathname = request.nextUrl.pathname;
 
-  if (
-    request.nextUrl.pathname !== "/" &&
-    !user &&
-    !request.nextUrl.pathname.startsWith("/noauth") &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
-  ) {
-    // no user, potentially respond by redirecting the user to the login page
+  if (!user) {
+    if (isProtectedRoute(pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/auth/login";
+      return NextResponse.redirect(url);
+    }
+
+    return supabaseResponse;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("account_profiles")
+    .select("auth_user_id, real_name, status, is_admin")
+    .eq("auth_user_id", user.sub)
+    .maybeSingle<Pick<AccountProfile, "auth_user_id" | "real_name" | "status" | "is_admin">>();
+
+  if (profileError || !profile) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
+    return NextResponse.redirect(url);
+  }
+
+  const homePath = getAccountHomePath(profile);
+
+  if (pathname === "/") {
+    const url = request.nextUrl.clone();
+    url.pathname = homePath;
+    return NextResponse.redirect(url);
+  }
+
+  if (AUTH_ROUTES.has(pathname) && pathname !== "/auth/pending") {
+    const url = request.nextUrl.clone();
+    url.pathname = homePath;
+    return NextResponse.redirect(url);
+  }
+
+  if (!profile.is_admin && profile.status !== "approved") {
+    if (pathname !== "/auth/pending") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/auth/pending";
+      return NextResponse.redirect(url);
+    }
+
+    return supabaseResponse;
+  }
+
+  if (pathname === "/auth/pending") {
+    const url = request.nextUrl.clone();
+    url.pathname = homePath;
+    return NextResponse.redirect(url);
+  }
+
+  if (pathname.startsWith("/admin") && !profile.is_admin) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/family-tree/graph";
     return NextResponse.redirect(url);
   }
 

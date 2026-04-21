@@ -1,23 +1,23 @@
 import Link from "next/link";
 import { Button } from "./ui/button";
-import { createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "./logout-button";
+import { getCurrentAccountProfile } from "@/lib/account/server";
 
 export async function AuthButton() {
-  const supabase = await createClient();
+  const profile = await getCurrentAccountProfile();
 
-  // You can also use getUser() which will be slower.
-  const { data } = await supabase.auth.getClaims();
-
-  const user = data?.claims;
-
-  return user ? (
+  return profile ? (
     <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4 w-full md:w-auto">
       <span className="text-sm font-medium truncate max-w-[200px] md:max-w-none mb-2 md:mb-0">
-        你好, {user.email}!
+        你好，{profile.real_name}
       </span>
       <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
-        <Button asChild size="sm" variant={"outline"} className="w-full md:w-auto">
+        {profile.is_admin && (
+          <Button asChild size="sm" variant="secondary" className="w-full md:w-auto">
+            <Link href="/admin/accounts">账号审核</Link>
+          </Button>
+        )}
+        <Button asChild size="sm" variant="outline" className="w-full md:w-auto">
           <Link href="/family-tree">数据维护</Link>
         </Button>
         <LogoutButton className="w-full md:w-auto" />

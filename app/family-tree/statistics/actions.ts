@@ -1,5 +1,6 @@
 "use server";
 
+import { requireApprovedAccount } from "@/lib/account/server";
 import { createClient } from "@/lib/supabase/server";
 
 export interface StatisticsData {
@@ -15,6 +16,15 @@ export async function fetchFamilyStatistics(): Promise<{
   data: StatisticsData | null;
   error: string | null;
 }> {
+  try {
+    await requireApprovedAccount();
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "当前账号无权访问",
+    };
+  }
+
   const supabase = await createClient();
 
   // Fetch only necessary fields for statistics to improve performance

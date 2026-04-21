@@ -1,5 +1,6 @@
 "use server";
 
+import { requireApprovedAccount } from "@/lib/account/server";
 import { createClient } from "@/lib/supabase/server";
 
 export interface BiographyMember {
@@ -25,6 +26,15 @@ export async function fetchMembersWithBiography(): Promise<{
     data: BiographyMember[];
     error: string | null;
 }> {
+    try {
+        await requireApprovedAccount();
+    } catch (error) {
+        return {
+            data: [],
+            error: error instanceof Error ? error.message : "当前账号无权访问",
+        };
+    }
+
     const supabase = await createClient();
 
     // 查询有 remarks 的成员

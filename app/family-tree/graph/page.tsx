@@ -4,6 +4,7 @@ import { FamilyTreeGraph } from "./family-tree-graph";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Box } from "lucide-react";
+import { getCurrentAccountProfile } from "@/lib/account/server";
 
 function GraphSkeleton() {
   return (
@@ -15,6 +16,7 @@ function GraphSkeleton() {
 
 async function GraphLoader() {
   const { data, error } = await fetchAllFamilyMembers();
+  const profile = await getCurrentAccountProfile();
 
   if (error) {
     return (
@@ -32,7 +34,7 @@ async function GraphLoader() {
     );
   }
 
-  return <FamilyTreeGraph initialData={data} />;
+  return <FamilyTreeGraph initialData={data} watermarkName={profile?.real_name ?? null} />;
 }
 
 export default function FamilyTreeGraphPage() {

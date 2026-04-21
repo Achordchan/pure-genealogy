@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState, useRef, useEffect, memo, type MouseEvent } from "react";
-import { createClient } from "@/lib/supabase/client";
 import {
   ReactFlow,
   Controls,
@@ -61,10 +60,12 @@ const edgeTypes = {
 
 interface FamilyTreeGraphProps {
   initialData: FamilyMemberNode[];
+  watermarkName: string | null;
 }
 
 interface FamilyTreeGraphInnerProps {
   initialData: FamilyMemberNode[];
+  watermarkName: string | null;
   onMemberClick?: (member: FamilyMemberNode) => void;
 }
 
@@ -275,21 +276,13 @@ function getLayoutedElements(
   return { nodes: [...memberNodes, ...generationNodes], edges };
 }
 
-const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({ initialData, onMemberClick }: FamilyTreeGraphInnerProps) {
+const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
+  initialData,
+  watermarkName,
+  onMemberClick,
+}: FamilyTreeGraphInnerProps) {
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [userEmail, setUserEmail] = useState<string>("");
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const supabase = createClient();
-      const { data: { user } = {} } = await supabase.auth.getUser();
-      if (user?.email) {
-        setUserEmail(user.email);
-      }
-    };
-    fetchUser();
-  }, []);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
@@ -662,7 +655,7 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({ initialData, o
     }
 
     // 4. 绘制水印 (平铺)
-    const watermarkText = userEmail || 'Liu Family';
+    const watermarkText = watermarkName || "家族族谱";
     ctx.save();
     ctx.rotate(-30 * Math.PI / 180);
     ctx.font = "16px sans-serif";
@@ -708,7 +701,7 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({ initialData, o
     a.setAttribute("download", `family-tree-${new Date().toISOString().split('T')[0]}.jpg`);
     a.setAttribute("href", finalDataUrl);
     a.click();
-  }, [nodes, userEmail]);
+  }, [nodes, watermarkName]);
 
   const toggleDraggable = useCallback(() => {
     setIsDraggable((prev) => !prev);
@@ -860,7 +853,7 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({ initialData, o
   );
 });
 
-export function FamilyTreeGraph({ initialData }: FamilyTreeGraphProps) {
+export function FamilyTreeGraph({ initialData, watermarkName }: FamilyTreeGraphProps) {
   const [selectedMember, setSelectedMember] = useState<FamilyMemberNode | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
@@ -881,9 +874,13 @@ export function FamilyTreeGraph({ initialData }: FamilyTreeGraphProps) {
   }, []);
 
   return (
-    <>
+      <>
       <ReactFlowProvider>
-        <FamilyTreeGraphInner initialData={initialData} onMemberClick={handleMemberClick} />
+        <FamilyTreeGraphInner
+          initialData={initialData}
+          watermarkName={watermarkName}
+          onMemberClick={handleMemberClick}
+        />
       </ReactFlowProvider>
 
       {/* 成员详情弹窗 */}
