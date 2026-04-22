@@ -16,7 +16,7 @@ export function BackendPageHeader({
         <h2 className="text-3xl font-bold">{title}</h2>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
-      <BackendNav items={items} className="overflow-x-auto pb-1" />
+      <BackendNav items={items} className="-mx-1 overflow-x-auto px-1 pt-2 pb-1" />
     </div>
   );
 }

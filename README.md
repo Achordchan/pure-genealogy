@@ -78,11 +78,12 @@ npm install
 
 ### 3. 配置环境变量
 
-复制 `.env.example` (或新建) 为 `.env.local` 并填入 Supabase 项目配置：
+新建 `.env.local` 并填入 Supabase 项目配置：
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=你的_Supabase_项目_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=你的_Supabase_Anon_Key
+SUPABASE_SERVICE_ROLE_KEY=你的_Supabase_Service_Role_Key
 ACCOUNT_ID_HASH_SALT=你自定义的一串高强度随机字符
 INITIAL_ADMIN_ID_HASHES=管理员身份证哈希1,管理员身份证哈希2
 NEXT_PUBLIC_FAMILY_SURNAME=陈
@@ -120,7 +121,7 @@ npm run dev
 ## 🔐 权限模型
 
 - `admin`
-  - 账号审核、账号管理、角色分配、成员绑定
+  - 账号审核、角色分配、成员绑定
   - 族谱成员增删改查、批量导入
   - 草稿审核
   - 成员资料图片上传、导入源文件归档
@@ -145,7 +146,7 @@ npm run dev
 /
 ├── app/                  # Next.js App Router 核心目录
 │   ├── auth/             # 认证流程页面
-│   ├── admin/            # 管理员账号审核与账号管理
+│   ├── admin/            # 管理员账号审核
 │   ├── family-tree/      # 族谱主要功能区
 │   │   ├── graph/        # 2D 视图 (React Flow)
 │   │   ├── graph-3d/     # 3D 视图 (Force Graph)

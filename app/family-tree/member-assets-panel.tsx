@@ -149,20 +149,20 @@ export function MemberAssetsPanel({
 
   return (
     <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="space-y-3">
+        <div className="min-w-0">
           <p className="text-sm font-medium">资料附件</p>
           <p className="text-xs text-muted-foreground">
             支持查看成员图片资料，编辑员和管理员可上传。
           </p>
         </div>
         {canUpload && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              className="max-w-[220px] text-xs"
+              className="max-w-full text-xs sm:max-w-[280px]"
               onChange={(event) => {
                 const nextFile = event.target.files?.[0] ?? null;
                 if (nextFile && !isImageMimeType(nextFile.type)) {

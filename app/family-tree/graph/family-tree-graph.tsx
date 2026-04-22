@@ -24,6 +24,7 @@ import {
   RotateCcw,
   Maximize,
   Minimize,
+  LocateFixed,
   Search,
   X,
   Download,
@@ -61,11 +62,13 @@ const edgeTypes = {
 interface FamilyTreeGraphProps {
   initialData: FamilyMemberNode[];
   watermarkName: string | null;
+  currentMemberId: number | null;
 }
 
 interface FamilyTreeGraphInnerProps {
   initialData: FamilyMemberNode[];
   watermarkName: string | null;
+  currentMemberId: number | null;
   onMemberClick?: (member: FamilyMemberNode) => void;
 }
 
@@ -74,6 +77,45 @@ const NODE_WIDTH = 160;
 const NODE_HEIGHT = 120; // 增加高度以容纳配偶信息
 const HORIZONTAL_GAP = 80;
 const VERTICAL_GAP = 120;
+
+function buildBranchPathIds(
+  focusId: number | null,
+  members: FamilyMemberNode[],
+  childrenMap: Map<number, number[]>,
+) {
+  if (!focusId) {
+    return new Set<string>();
+  }
+
+  const pathSet = new Set<string>();
+  const memberMap = new Map(members.map((member) => [member.id, member]));
+  let currentId = focusId;
+
+  pathSet.add(String(currentId));
+
+  while (true) {
+    const member = memberMap.get(currentId);
+    if (!member || !member.father_id) break;
+
+    pathSet.add(String(member.father_id));
+    pathSet.add(`e${member.father_id}-${currentId}`);
+    currentId = member.father_id;
+  }
+
+  const queue = [focusId];
+  while (queue.length > 0) {
+    const parentId = queue.shift()!;
+    const children = childrenMap.get(parentId) || [];
+
+    children.forEach((childId) => {
+      pathSet.add(String(childId));
+      pathSet.add(`e${parentId}-${childId}`);
+      queue.push(childId);
+    });
+  }
+
+  return pathSet;
+}
 
 // 使用 dagre 进行自动布局，避免连线交叉
 function getLayoutedElements(
@@ -279,6 +321,7 @@ function getLayoutedElements(
 const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
   initialData,
   watermarkName,
+  currentMemberId,
   onMemberClick,
 }: FamilyTreeGraphInnerProps) {
   const reactFlowInstance = useReactFlow();
@@ -286,6 +329,7 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  const [highlightSource, setHighlightSource] = useState<"search" | "self" | null>(null);
   // 新增：存储高亮路径上的所有元素 ID（节点 ID 和 连线 ID）
   const [highlightedPathIds, setHighlightedPathIds] = useState<Set<string>>(new Set());
 
@@ -315,42 +359,7 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
       return;
     }
 
-    const pathSet = new Set<string>();
-    const memberMap = new Map(initialData.map(m => [m.id, m]));
-
-    // 1. 向上溯源 (Ancestors)
-    let currentId = highlightedId;
-    pathSet.add(String(currentId)); // 添加当前节点
-
-    while (true) {
-      const member = memberMap.get(currentId);
-      if (!member || !member.father_id) break;
-
-      // 添加父节点 ID
-      pathSet.add(String(member.father_id));
-      // 添加连接线 ID (注意 edge id 格式是 e{father}-{child})
-      pathSet.add(`e${member.father_id}-${currentId}`);
-
-      currentId = member.father_id;
-    }
-
-    // 2. 向下繁衍 (Descendants)
-    const queue = [highlightedId];
-    while (queue.length > 0) {
-      const parentId = queue.shift()!;
-      const children = childrenMap.get(parentId) || [];
-
-      children.forEach(childId => {
-        // 添加子节点 ID
-        pathSet.add(String(childId));
-        // 添加连接线 ID
-        pathSet.add(`e${parentId}-${childId}`);
-        // 继续向下遍历
-        queue.push(childId);
-      });
-    }
-
-    setHighlightedPathIds(pathSet);
+    setHighlightedPathIds(buildBranchPathIds(highlightedId, initialData, childrenMap));
   }, [highlightedId, initialData, childrenMap]);
 
   // 处理折叠切换
@@ -471,9 +480,49 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
     }, 10);
   }, [reactFlowInstance, initialData, childrenMap, collapsedIds, highlightedId, setNodes, onToggleCollapse]);
 
+  const focusMember = useCallback((targetId: number | null) => {
+    if (!targetId) {
+      return;
+    }
+
+    const found = initialData.find((member) => member.id === targetId);
+    if (!found) {
+      return;
+    }
+
+    let current = found;
+    const idsToExpand = new Set<number>();
+
+    while (current.father_id) {
+      if (collapsedIds.has(current.father_id)) {
+        idsToExpand.add(current.father_id);
+      }
+      const father = initialData.find((member) => member.id === current.father_id);
+      if (!father) {
+        break;
+      }
+      current = father;
+    }
+
+    if (idsToExpand.size > 0) {
+      setCollapsedIds((prev) => {
+        const next = new Set(prev);
+        idsToExpand.forEach((id) => next.delete(id));
+        return next;
+      });
+      setTimeout(() => {
+        setHighlightedId(found.id);
+      }, 100);
+      return;
+    }
+
+    setHighlightedId(found.id);
+  }, [collapsedIds, initialData]);
+
   // 搜索功能
   const onSearch = useCallback(() => {
     if (!searchQuery.trim()) {
+      setHighlightSource(null);
       setHighlightedId(null);
       return;
     }
@@ -483,33 +532,13 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
     );
 
     if (found) {
-      let current = found;
-      const idsToExpand = new Set<number>();
-      while (current.father_id) {
-        if (collapsedIds.has(current.father_id)) {
-          idsToExpand.add(current.father_id);
-        }
-        const father = initialData.find(m => m.id === current.father_id);
-        if (!father) break;
-        current = father;
-      }
-
-      if (idsToExpand.size > 0) {
-        setCollapsedIds(prev => {
-          const next = new Set(prev);
-          idsToExpand.forEach(id => next.delete(id));
-          return next;
-        });
-        setTimeout(() => {
-          setHighlightedId(found.id);
-        }, 100);
-      } else {
-        setHighlightedId(found.id);
-      }
+      setHighlightSource("search");
+      focusMember(found.id);
     } else {
+      setHighlightSource(null);
       setHighlightedId(null);
     }
-  }, [searchQuery, initialData, collapsedIds]);
+  }, [focusMember, initialData, searchQuery]);
 
   // 监听 highlight 变化后聚焦
   useEffect(() => {
@@ -527,8 +556,28 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
   // 清除搜索
   const onClearSearch = useCallback(() => {
     setSearchQuery("");
+    setHighlightSource(null);
     setHighlightedId(null);
   }, []);
+
+  const onLocateCurrentMember = useCallback(() => {
+    if (highlightSource === "self" && highlightedId === currentMemberId) {
+      setHighlightSource(null);
+      setHighlightedId(null);
+      return;
+    }
+
+    setSearchQuery("");
+    setHighlightSource("self");
+    focusMember(currentMemberId);
+  }, [currentMemberId, focusMember, highlightSource, highlightedId]);
+
+  useEffect(() => {
+    if (highlightSource === "search" && !searchQuery.trim()) {
+      setHighlightSource(null);
+      setHighlightedId(null);
+    }
+  }, [highlightSource, searchQuery]);
 
   // 节点点击事件
   const onNodeClick = useCallback(
@@ -761,6 +810,17 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
               onKeyDown={(e) => e.key === "Enter" && onSearch()}
               className="h-8 w-28 sm:w-40 md:w-56 border-0 focus-visible:ring-0 placeholder:text-muted-foreground/70"
             />
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
+              onClick={onLocateCurrentMember}
+              title="快速定位到本人"
+              disabled={!currentMemberId}
+              data-active={highlightSource === "self" && highlightedId === currentMemberId}
+            >
+              <LocateFixed className="h-4 w-4" />
+            </Button>
             <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onSearch} title="搜索成员">
               <Search className="h-4 w-4" />
             </Button>
@@ -853,7 +913,7 @@ const FamilyTreeGraphInner = memo(function FamilyTreeGraphInner({
   );
 });
 
-export function FamilyTreeGraph({ initialData, watermarkName }: FamilyTreeGraphProps) {
+export function FamilyTreeGraph({ initialData, watermarkName, currentMemberId }: FamilyTreeGraphProps) {
   const [selectedMember, setSelectedMember] = useState<FamilyMemberNode | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
@@ -879,6 +939,7 @@ export function FamilyTreeGraph({ initialData, watermarkName }: FamilyTreeGraphP
         <FamilyTreeGraphInner
           initialData={initialData}
           watermarkName={watermarkName}
+          currentMemberId={currentMemberId}
           onMemberClick={handleMemberClick}
         />
       </ReactFlowProvider>

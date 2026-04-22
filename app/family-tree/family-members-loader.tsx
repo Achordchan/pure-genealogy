@@ -1,7 +1,11 @@
 import { fetchFamilyMembers } from "./actions";
 import { FamilyMembersTable } from "./family-members-table";
 import { getCurrentAccountProfile } from "@/lib/account/server";
-import { canDeleteFamilyMembers, canImportFamilyMembers } from "@/lib/account/shared";
+import {
+  canDeleteFamilyMembers,
+  canImportFamilyMembers,
+  canManageAccounts,
+} from "@/lib/account/shared";
 
 interface FamilyMembersLoaderProps {
   page: number;
@@ -34,6 +38,7 @@ export async function FamilyMembersLoader({
       searchQuery={search}
       canDelete={profile ? canDeleteFamilyMembers(profile) : false}
       canImport={profile ? canImportFamilyMembers(profile) : false}
+      canManageAccounts={profile ? canManageAccounts(profile) : false}
     />
   );
 }

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EMPTY_BACKOFFICE_NOTICE_COUNTS,
   canDeleteFamilyMembers,
@@ -31,6 +32,11 @@ export interface BackofficeNavItem {
   label: string;
 }
 
+interface IdentityAuthUser {
+  id: string;
+  email: string | null;
+}
+
 export async function getAccountProfileByAuthUserId(authUserId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -44,6 +50,67 @@ export async function getAccountProfileByAuthUserId(authUserId: string) {
   }
 
   return data;
+}
+
+export async function findAccountProfileByHashForAdmin(idCardHash: string) {
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
+    .from("account_profiles")
+    .select("*")
+    .eq("id_card_hash", idCardHash)
+    .maybeSingle<AccountProfile>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+export async function findAccountProfileForLoginByAdmin(realName: string, idCard: string) {
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
+    .from("account_profiles")
+    .select("*")
+    .eq("real_name_normalized", normalizeRealName(realName))
+    .eq("id_card_hash", hashIdCard(idCard))
+    .maybeSingle<AccountProfile>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+export async function findInternalAuthUserByEmailForAdmin(email: string) {
+  const adminClient = createAdminClient();
+  let page = 1;
+
+  while (true) {
+    const { data, error } = await adminClient.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const matchedUser = (data.users as IdentityAuthUser[]).find(
+      (user) => user.email?.toLowerCase() === email.toLowerCase(),
+    );
+
+    if (matchedUser) {
+      return matchedUser;
+    }
+
+    if (!data.nextPage || data.users.length === 0) {
+      return null;
+    }
+
+    page = data.nextPage;
+  }
 }
 
 export async function getCurrentAccountProfile() {
@@ -60,19 +127,7 @@ export async function getCurrentAccountProfile() {
 }
 
 export async function findAccountProfileForLogin(realName: string, idCard: string) {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("account_profiles")
-    .select("*")
-    .eq("real_name_normalized", normalizeRealName(realName))
-    .eq("id_card_hash", hashIdCard(idCard))
-    .maybeSingle<AccountProfile>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return findAccountProfileForLoginByAdmin(realName, idCard);
 }
 
 export async function requireSignedInAccount() {
@@ -198,26 +253,9 @@ export function getBackofficeNavItems(
 
   if (canManageAccounts(profile)) {
     items.push({ href: "/admin/accounts", label: "账号审核" });
-    items.push({ href: "/admin/accounts/manage", label: "账号管理" });
   }
 
   return items;
-}
-
-export async function listApprovedAccounts() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("account_profiles")
-    .select("*")
-    .eq("status", "approved")
-    .order("created_at", { ascending: true })
-    .returns<AccountProfile[]>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data ?? [];
 }
 
 export async function listFamilyMemberOptions() {
@@ -279,6 +317,7 @@ export function createProfileInsertPayload(params: {
     auth_user_id: params.authUserId,
     real_name: params.realName.trim(),
     real_name_normalized: normalizeRealName(params.realName),
+    id_card_value: normalizeIdCard(params.idCard),
     id_card_hash: hashIdCard(params.idCard),
     id_card_masked: maskIdCard(params.idCard),
     role: params.role,

@@ -7,6 +7,12 @@ import {
   requireEditorAccount,
 } from "@/lib/account/server";
 import { revalidatePath } from "next/cache";
+import { canManageAccounts } from "@/lib/account/shared";
+import {
+  getMemberAccountProfileForAdmin,
+  syncMemberAccountForAdmin,
+  type MemberAccountSnapshot,
+} from "@/lib/account/member-account-sync";
 import {
   buildImportArchivePath,
   buildMemberAssetPath,
@@ -118,21 +124,25 @@ export interface CreateMemberInput {
   residence_place?: string | null;
 }
 
-export async function createFamilyMember(
-  input: CreateMemberInput
-): Promise<{ success: boolean; error: string | null }> {
-  try {
-    await requireEditorAccount();
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "当前账号无权操作",
-    };
-  }
+export interface MemberAccountInput {
+  idCard?: string;
+  phone?: string | null;
+  accountRole?: "member" | "editor";
+  removeAccount?: boolean;
+}
 
+export interface SaveFamilyMemberInput extends CreateMemberInput {
+  id?: number;
+  account?: MemberAccountInput;
+}
+
+export interface EditableFamilyMember extends FamilyMember {
+  account_profile: MemberAccountSnapshot | null;
+}
+
+async function persistFamilyMember(input: SaveFamilyMemberInput) {
   const supabase = await createClient();
-
-  const { error } = await supabase.from("family_members").insert({
+  const payload = {
     name: input.name,
     generation: input.generation,
     sibling_order: input.sibling_order,
@@ -145,14 +155,79 @@ export async function createFamilyMember(
     birthday: input.birthday,
     death_date: input.death_date,
     residence_place: input.residence_place,
-  });
+    updated_at: new Date().toISOString(),
+  };
 
-  if (error) {
-    return { success: false, error: error.message };
+  if (input.id) {
+    const { error } = await supabase
+      .from("family_members")
+      .update(payload)
+      .eq("id", input.id);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { memberId: input.id, isNew: false };
   }
 
-  revalidatePath("/family-tree", "layout");
-  return { success: true, error: null };
+  const { data, error } = await supabase
+    .from("family_members")
+    .insert(payload)
+    .select("id")
+    .single<{ id: number }>();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "创建成员失败");
+  }
+
+  return { memberId: data.id, isNew: true };
+}
+
+export async function saveFamilyMemberWithAccount(
+  input: SaveFamilyMemberInput,
+): Promise<{ success: boolean; error: string | null }> {
+  let createdMemberId: number | null = null;
+
+  try {
+    const account = await requireEditorAccount();
+    const { memberId, isNew } = await persistFamilyMember(input);
+
+    if (isNew) {
+      createdMemberId = memberId;
+    }
+
+    if (input.account) {
+      if (!canManageAccounts(account.profile)) {
+        throw new Error("仅管理员可以维护登录资料");
+      }
+
+      await syncMemberAccountForAdmin({
+        memberId,
+        realName: input.name,
+        approvedBy: account.user.id,
+        idCard: input.account.idCard,
+        phone: input.account.phone,
+        role: input.account.accountRole,
+      });
+    }
+
+    revalidatePath("/family-tree", "layout");
+    revalidatePath("/admin/accounts");
+    revalidatePath("/", "layout");
+    revalidatePath("/auth/pending");
+    return { success: true, error: null };
+  } catch (error) {
+    if (createdMemberId !== null) {
+      const supabase = await createClient();
+      await supabase.from("family_members").delete().eq("id", createdMemberId);
+    }
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "保存成员失败",
+    };
+  }
 }
 
 export async function deleteFamilyMembers(
@@ -213,10 +288,6 @@ export async function fetchAllMembersForSelect(): Promise<
   return data || [];
 }
 
-export interface UpdateMemberInput extends CreateMemberInput {
-  id: number;
-}
-
 // 根据 ID 获取单个成员
 export async function fetchMemberById(
   id: number
@@ -257,45 +328,28 @@ export async function fetchMemberById(
   } as FamilyMember;
 }
 
-export async function updateFamilyMember(
-  input: UpdateMemberInput
-): Promise<{ success: boolean; error: string | null }> {
+export async function fetchEditableMemberById(
+  id: number,
+): Promise<EditableFamilyMember | null> {
   try {
-    await requireEditorAccount();
-  } catch (error) {
+    const account = await requireEditorAccount();
+    const member = await fetchMemberById(id);
+
+    if (!member) {
+      return null;
+    }
+
+    const accountProfile = canManageAccounts(account.profile)
+      ? await getMemberAccountProfileForAdmin(id)
+      : null;
+
     return {
-      success: false,
-      error: error instanceof Error ? error.message : "当前账号无权操作",
+      ...member,
+      account_profile: accountProfile,
     };
+  } catch {
+    return null;
   }
-
-  const supabase = await createClient();
-
-  const { error } = await supabase
-    .from("family_members")
-    .update({
-      name: input.name,
-      generation: input.generation,
-      sibling_order: input.sibling_order,
-      father_id: input.father_id,
-      gender: input.gender,
-      official_position: input.official_position,
-      is_alive: input.is_alive ?? true,
-      spouse: input.spouse,
-      remarks: input.remarks,
-      birthday: input.birthday,
-      death_date: input.death_date,
-      residence_place: input.residence_place,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.id);
-
-  if (error) {
-    return { success: false, error: error.message };
-  }
-
-  revalidatePath("/family-tree", "layout");
-  return { success: true, error: null };
 }
 
 export interface ImportMemberInput {

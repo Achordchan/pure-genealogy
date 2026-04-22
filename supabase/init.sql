@@ -28,6 +28,7 @@ create table if not exists account_profiles (
     auth_user_id uuid not null unique references auth.users(id) on delete cascade,
     real_name text not null,
     real_name_normalized text not null,
+    id_card_value text,
     id_card_hash text not null unique,
     id_card_masked text not null,
     phone text,
@@ -39,6 +40,9 @@ create table if not exists account_profiles (
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table public.account_profiles
+    add column if not exists id_card_value text;
 
 create index if not exists idx_account_profiles_auth_user_id
     on account_profiles(auth_user_id);
@@ -196,7 +200,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if public.app_is_admin() then
+  if public.app_is_admin() or auth.uid() is null then
     return new;
   end if;
 
@@ -207,6 +211,7 @@ begin
   if new.auth_user_id is distinct from old.auth_user_id
      or new.real_name is distinct from old.real_name
      or new.real_name_normalized is distinct from old.real_name_normalized
+     or new.id_card_value is distinct from old.id_card_value
      or new.id_card_hash is distinct from old.id_card_hash
      or new.id_card_masked is distinct from old.id_card_masked
      or new.status is distinct from old.status
@@ -763,6 +768,16 @@ begin
           then nullif(request_record.payload->>'birthday', '')::date
         else birthday
       end,
+      gender = case
+        when request_record.payload ? 'gender'
+          then nullif(request_record.payload->>'gender', '')
+        else gender
+      end,
+      is_alive = case
+        when request_record.payload ? 'is_alive'
+          then coalesce(nullif(request_record.payload->>'is_alive', '')::boolean, is_alive)
+        else is_alive
+      end,
       death_date = case
         when request_record.payload ? 'death_date'
           then nullif(request_record.payload->>'death_date', '')::date
@@ -788,7 +803,7 @@ begin
 
   update public.member_change_requests
   set status = 'approved',
-      review_comment = nullif(trim(review_comment), ''),
+      review_comment = nullif(trim(app_approve_member_change_request.review_comment), ''),
       reviewed_by = auth.uid(),
       reviewed_at = now(),
       updated_at = now()
@@ -827,7 +842,7 @@ begin
 
   update public.member_change_requests
   set status = 'rejected',
-      review_comment = nullif(trim(review_comment), ''),
+      review_comment = nullif(trim(app_reject_member_change_request.review_comment), ''),
       reviewed_by = auth.uid(),
       reviewed_at = now(),
       updated_at = now()

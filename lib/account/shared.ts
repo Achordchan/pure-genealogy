@@ -5,6 +5,8 @@ export const ACCOUNT_ROLES = ["admin", "editor", "member"] as const;
 export const DRAFT_EDITABLE_FIELDS = [
   "spouse",
   "birthday",
+  "gender",
+  "is_alive",
   "death_date",
   "residence_place",
   "official_position",
@@ -20,6 +22,7 @@ export interface AccountProfile {
   auth_user_id: string;
   real_name: string;
   real_name_normalized: string;
+  id_card_value: string | null;
   id_card_hash: string;
   id_card_masked: string;
   phone: string | null;

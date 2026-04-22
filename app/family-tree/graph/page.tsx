@@ -36,7 +36,13 @@ async function GraphLoader() {
     );
   }
 
-  return <FamilyTreeGraph initialData={data} watermarkName={profile?.real_name ?? null} />;
+  return (
+    <FamilyTreeGraph
+      initialData={data}
+      watermarkName={profile?.real_name ?? null}
+      currentMemberId={profile?.member_id ?? null}
+    />
+  );
 }
 
 export default function FamilyTreeGraphPage() {

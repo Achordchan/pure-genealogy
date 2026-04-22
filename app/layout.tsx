@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next";
 import NextTopLoader from "nextjs-toploader";
 import "./globals.css";
 import { FAMILY_SURNAME } from "@/lib/utils";
+import { AppToaster } from "@/components/app-toaster";
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -45,6 +46,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {children}
+          <AppToaster />
         </ThemeProvider>
         <Analytics />
       </body>

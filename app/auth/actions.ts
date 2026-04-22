@@ -4,16 +4,18 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getCurrentAccountProfile,
-  listApprovedAccounts,
   listFamilyMemberOptions,
   listPendingAccounts,
   requireAdminAccount,
   requireSignedInAccount,
   buildLoginCredentials,
   createProfileInsertPayload,
-  findAccountProfileForLogin,
+  findAccountProfileByHashForAdmin,
+  findAccountProfileForLoginByAdmin,
+  findInternalAuthUserByEmailForAdmin,
   getAccountRedirectPath,
 } from "@/lib/account/server";
 import {
@@ -24,6 +26,11 @@ import {
   validateIdCard,
   validateRealName,
 } from "@/lib/account/shared";
+import {
+  clearPendingPhoneDraft,
+  setFlashMessage,
+  setPendingPhoneDraft,
+} from "@/lib/flash";
 
 export interface AuthFormState {
   error: string | null;
@@ -44,19 +51,24 @@ function validateIdentityForm(realName: string, idCard: string) {
   return null;
 }
 
-async function findProfileByHash(idCardHash: string) {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("account_profiles")
-    .select("*")
-    .eq("id_card_hash", idCardHash)
-    .maybeSingle<AccountProfile>();
-
-  if (error) {
-    throw new Error(error.message);
+function getExistingAccountMessage(profile: Pick<AccountProfile, "status">) {
+  if (profile.status === "pending") {
+    return "账号正在审核，请直接登录查看状态";
   }
 
-  return data;
+  return "该身份已存在，请直接登录";
+}
+
+async function signInWithIdentityCredentials(idCardHash: string, idCard: string) {
+  const supabase = await createClient();
+  const credentials = buildLoginCredentials({ id_card_hash: idCardHash }, idCard);
+
+  const { error } = await supabase.auth.signInWithPassword(credentials);
+
+  return {
+    supabase,
+    error,
+  };
 }
 
 export async function loginWithIdentityAction(
@@ -72,7 +84,7 @@ export async function loginWithIdentityAction(
       return { error: validationError };
     }
 
-    const profile = await findAccountProfileForLogin(realName, idCard);
+    const profile = await findAccountProfileForLoginByAdmin(realName, idCard);
     if (!profile) {
       return { error: "姓名或身份证号不正确" };
     }
@@ -105,6 +117,7 @@ export async function signUpWithIdentityAction(
       return { error: validationError };
     }
 
+    const initialAdminHashes = getInitialAdminHashes();
     const initialPayload = createProfileInsertPayload({
       authUserId: "",
       realName,
@@ -112,44 +125,64 @@ export async function signUpWithIdentityAction(
       role: "member",
       status: "pending",
     });
-
-    const existingProfile = await findProfileByHash(initialPayload.id_card_hash);
-    if (existingProfile) {
-      return { error: "该身份已存在，请直接登录" };
-    }
-
-    const supabase = await createClient();
-    const internalEmail = buildInternalAccountEmail(initialPayload.id_card_hash);
+    const idCardHash = initialPayload.id_card_hash;
+    const internalEmail = buildInternalAccountEmail(idCardHash);
     const normalizedPassword = buildLoginCredentials(
-      { id_card_hash: initialPayload.id_card_hash },
+      { id_card_hash: idCardHash },
       idCard,
     ).password;
+    const isInitialAdmin = initialAdminHashes.has(idCardHash);
 
-    let authUserId = "";
-    const signUpResult = await supabase.auth.signUp({
-      email: internalEmail,
-      password: normalizedPassword,
-    });
+    const existingProfile = await findAccountProfileByHashForAdmin(idCardHash);
+    if (existingProfile) {
+      if (existingProfile.status === "pending") {
+        const { error: loginError } = await signInWithIdentityCredentials(idCardHash, idCard);
 
-    authUserId = signUpResult.data.user?.id ?? "";
+        if (!loginError) {
+          redirect("/auth/pending");
+        }
+      }
 
-    if (!authUserId && signUpResult.error) {
-      const retryLogin = await supabase.auth.signInWithPassword({
+      return { error: getExistingAccountMessage(existingProfile) };
+    }
+
+    const existingAuthUser = await findInternalAuthUserByEmailForAdmin(internalEmail);
+    const adminClient = createAdminClient();
+
+    let authUserId = existingAuthUser?.id ?? "";
+    let createdAuthUserId: string | null = null;
+
+    if (existingAuthUser) {
+      const { error: updateUserError } = await adminClient.auth.admin.updateUserById(existingAuthUser.id, {
         email: internalEmail,
         password: normalizedPassword,
+        email_confirm: true,
+        user_metadata: {
+          real_name: realName.trim(),
+        },
       });
-      authUserId = retryLogin.data.user?.id ?? "";
 
-      if (!authUserId) {
-        return { error: "该身份已存在，请直接登录" };
+      if (updateUserError) {
+        return { error: "注册失败，请稍后重试" };
       }
+    } else {
+      const { data: createdUser, error: createUserError } = await adminClient.auth.admin.createUser({
+        email: internalEmail,
+        password: normalizedPassword,
+        email_confirm: true,
+        user_metadata: {
+          real_name: realName.trim(),
+        },
+      });
+
+      if (createUserError || !createdUser.user) {
+        return { error: "注册失败，请稍后重试" };
+      }
+
+      authUserId = createdUser.user.id;
+      createdAuthUserId = createdUser.user.id;
     }
 
-    if (!authUserId) {
-      return { error: "注册失败，请稍后重试" };
-    }
-
-    const isInitialAdmin = getInitialAdminHashes().has(initialPayload.id_card_hash);
     const profilePayload = createProfileInsertPayload({
       authUserId,
       realName,
@@ -158,19 +191,27 @@ export async function signUpWithIdentityAction(
       status: isInitialAdmin ? "approved" : "pending",
     });
 
-    const { error: loginError } = await supabase.auth.signInWithPassword({
-      email: internalEmail,
-      password: normalizedPassword,
-    });
+    const { error: insertError } = await adminClient.from("account_profiles").insert(profilePayload);
+
+    if (insertError) {
+      if (createdAuthUserId) {
+        await adminClient.auth.admin.deleteUser(createdAuthUserId);
+      }
+
+      if (insertError.message.includes("duplicate")) {
+        const repairedProfile = await findAccountProfileByHashForAdmin(idCardHash);
+        if (repairedProfile) {
+          return { error: getExistingAccountMessage(repairedProfile) };
+        }
+      }
+
+      return { error: "账号已创建，但资料写入失败，请联系管理员处理" };
+    }
+
+    const { error: loginError } = await signInWithIdentityCredentials(idCardHash, idCard);
 
     if (loginError) {
       return { error: "注册成功，但自动登录失败，请返回登录页重新登录" };
-    }
-
-    const { error: insertError } = await supabase.from("account_profiles").insert(profilePayload);
-
-    if (insertError && !insertError.message.includes("duplicate")) {
-      return { error: "账号已创建，但资料写入失败，请联系管理员处理" };
     }
 
     revalidatePath("/", "layout");
@@ -185,7 +226,9 @@ export async function updatePendingPhoneAction(formData: FormData) {
   const phone = getFieldValue(formData, "phone").trim();
 
   if (!/^1\d{10}$/.test(phone)) {
-    redirect(`/auth/pending?error=${encodeURIComponent("请输入正确的11位手机号")}`);
+    await setPendingPhoneDraft(phone);
+    await setFlashMessage({ type: "error", message: "请输入正确的11位手机号" });
+    redirect("/auth/pending");
   }
 
   const { supabase, profile } = await requireSignedInAccount();
@@ -195,11 +238,15 @@ export async function updatePendingPhoneAction(formData: FormData) {
     .eq("id", profile.id);
 
   if (error) {
-    redirect(`/auth/pending?error=${encodeURIComponent(error.message)}`);
+    await setPendingPhoneDraft(phone);
+    await setFlashMessage({ type: "error", message: error.message });
+    redirect("/auth/pending");
   }
 
   revalidatePath("/auth/pending");
-  redirect(`/auth/pending?success=${encodeURIComponent("手机号已保存")}`);
+  await clearPendingPhoneDraft();
+  await setFlashMessage({ type: "success", message: "手机号已保存" });
+  redirect("/auth/pending");
 }
 
 async function updatePendingAccountStatus(formData: FormData, status: "approved" | "rejected") {
@@ -210,16 +257,19 @@ async function updatePendingAccountStatus(formData: FormData, status: "approved"
   const memberId = memberIdRaw ? Number(memberIdRaw) : null;
 
   if (!accountId) {
-    redirect(`/admin/accounts?error=${encodeURIComponent("缺少账号标识")}`);
+    await setFlashMessage({ type: "error", message: "缺少账号标识" });
+    redirect("/admin/accounts");
   }
 
   if (status === "approved") {
     if (!role || role === "admin") {
-      redirect(`/admin/accounts?error=${encodeURIComponent("待审核账号只能批准为成员或编辑员")}`);
+      await setFlashMessage({ type: "error", message: "待审核账号只能批准为成员或编辑员" });
+      redirect("/admin/accounts");
     }
 
     if (!memberId) {
-      redirect(`/admin/accounts?error=${encodeURIComponent("批准账号前必须绑定成员")}`);
+      await setFlashMessage({ type: "error", message: "批准账号前必须绑定成员" });
+      redirect("/admin/accounts");
     }
   }
 
@@ -239,66 +289,30 @@ async function updatePendingAccountStatus(formData: FormData, status: "approved"
   const { error } = await supabase.rpc(rpcName, rpcParams);
 
   if (error) {
-    redirect(`/admin/accounts?error=${encodeURIComponent(error.message)}`);
+    await setFlashMessage({ type: "error", message: error.message });
+    redirect("/admin/accounts");
   }
 
   revalidatePath("/admin/accounts");
-  revalidatePath("/admin/accounts/manage");
   revalidatePath("/auth/pending");
   revalidatePath("/", "layout");
 }
 
 export async function approveAccountAction(formData: FormData) {
   await updatePendingAccountStatus(formData, "approved");
-  redirect(`/admin/accounts?success=${encodeURIComponent("账号已批准")}`);
+  await setFlashMessage({ type: "success", message: "账号已批准" });
+  redirect("/admin/accounts");
 }
 
 export async function rejectAccountAction(formData: FormData) {
   await updatePendingAccountStatus(formData, "rejected");
-  redirect(`/admin/accounts?success=${encodeURIComponent("账号已拒绝")}`);
-}
-
-export async function updateApprovedAccountAction(formData: FormData) {
-  const { supabase } = await requireAdminAccount();
-  const accountId = getFieldValue(formData, "accountId");
-  const role = normalizeAccountRole(getFieldValue(formData, "role"));
-  const memberIdRaw = getFieldValue(formData, "memberId");
-  const memberId = memberIdRaw ? Number(memberIdRaw) : null;
-
-  if (!accountId || !role) {
-    redirect(`/admin/accounts/manage?error=${encodeURIComponent("账号参数不完整")}`);
-  }
-
-  if (role !== "admin" && !memberId) {
-    redirect(`/admin/accounts/manage?error=${encodeURIComponent("成员或编辑员必须绑定族谱成员")}`);
-  }
-
-  const { error } = await supabase
-    .from("account_profiles")
-    .update({
-      role,
-      member_id: role === "admin" ? null : memberId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", accountId);
-
-  if (error) {
-    redirect(`/admin/accounts/manage?error=${encodeURIComponent(error.message)}`);
-  }
-
-  revalidatePath("/admin/accounts/manage");
-  revalidatePath("/", "layout");
-  redirect(`/admin/accounts/manage?success=${encodeURIComponent("账号信息已更新")}`);
+  await setFlashMessage({ type: "success", message: "账号已拒绝" });
+  redirect("/admin/accounts");
 }
 
 export async function getPendingAccountsForAdmin() {
   await requireAdminAccount();
   return listPendingAccounts();
-}
-
-export async function getApprovedAccountsForAdmin() {
-  await requireAdminAccount();
-  return listApprovedAccounts();
 }
 
 export async function getMemberOptionsForAdmin() {

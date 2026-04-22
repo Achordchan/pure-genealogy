@@ -2,14 +2,10 @@
 
 import * as React from "react";
 import * as XLSX from "xlsx";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
@@ -29,6 +25,7 @@ import {
   type ImportMemberInput,
 } from "./actions";
 import { FAMILY_SURNAME } from "@/lib/utils";
+import { AppDialogShell } from "@/components/app-dialog-shell";
 
 interface ImportMembersDialogProps {
   onSuccess?: () => void;
@@ -155,11 +152,12 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
     setIsLoading(false);
 
     if (result.success) {
-      alert(`成功导入 ${result.count} 条记录`);
+      toast.success(`成功导入 ${result.count} 条记录`);
       setIsOpen(false);
       onSuccess?.();
     } else {
       setError(`导入失败: ${result.error}`);
+      toast.error(`导入失败：${result.error}`);
     }
   };
 
@@ -171,15 +169,23 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
           批量导入
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>批量导入成员</DialogTitle>
-          <DialogDescription>
-            请先下载模板，填写数据后上传。支持 Excel (.xlsx, .xls) 和 CSV 格式。
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 py-4">
+      <AppDialogShell
+        title="批量导入成员"
+        description="请先下载模板，填写数据后上传。支持 Excel (.xlsx, .xls) 和 CSV 格式。"
+        contentClassName="sm:max-w-4xl"
+        bodyClassName="space-y-4"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setIsOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleImport} disabled={parsedData.length === 0 || !selectedFile || isLoading}>
+              {isLoading ? "处理中..." : "确认导入"}
+            </Button>
+          </>
+        }
+      >
+        <div className="grid gap-4">
           <div className="flex items-center gap-4">
             <Button variant="secondary" onClick={handleDownloadTemplate} size="sm">
               <Download className="h-4 w-4 mr-2" />
@@ -246,16 +252,7 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
             </div>
           )}
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setIsOpen(false)}>
-            取消
-          </Button>
-          <Button onClick={handleImport} disabled={parsedData.length === 0 || !selectedFile || isLoading}>
-            {isLoading ? "处理中..." : "确认导入"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </AppDialogShell>
     </Dialog>
   );
 }

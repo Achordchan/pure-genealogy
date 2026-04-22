@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 export function LoginForm({
   className,
@@ -26,6 +26,8 @@ export function LoginForm({
     loginWithIdentityAction,
     initialState,
   );
+  const [realName, setRealName] = useState("");
+  const [idCard, setIdCard] = useState("");
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -43,6 +45,8 @@ export function LoginForm({
                   id="realName"
                   name="realName"
                   type="text"
+                  value={realName}
+                  onChange={(event) => setRealName(event.target.value)}
                   placeholder="请输入真实姓名"
                   required
                 />
@@ -55,6 +59,8 @@ export function LoginForm({
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
+                  value={idCard}
+                  onChange={(event) => setIdCard(event.target.value)}
                   placeholder="请输入18位身份证号"
                   required
                 />

@@ -1,14 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { FamilyMemberNode } from "../graph/actions";
@@ -16,6 +9,7 @@ import { MemberSelect } from "./member-select";
 import { findShortestPath } from "./tour-utils";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AppDialogShell } from "@/components/app-dialog-shell";
 
 interface TourDialogProps {
   isOpen: boolean;
@@ -53,14 +47,23 @@ export function TourDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>自动巡游配置</DialogTitle>
-          <DialogDescription>
-            选择起始人和结束人，系统将自动规划路径并带您游览家族关系。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
+      <AppDialogShell
+        title="自动巡游配置"
+        description="选择起始人和结束人，系统将自动规划路径并带您游览家族关系。"
+        contentClassName="sm:max-w-[425px]"
+        bodyClassName="grid gap-4"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button onClick={handleStart} disabled={!startId || !endId}>
+              开始巡游
+            </Button>
+          </>
+        }
+      >
+        <div className="grid gap-4">
           <div className="grid gap-2">
             <Label>开始节点 (出发)</Label>
             <MemberSelect
@@ -87,15 +90,7 @@ export function TourDialog({
             </Alert>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={handleStart} disabled={!startId || !endId}>
-            开始巡游
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </AppDialogShell>
     </Dialog>
   );
 }

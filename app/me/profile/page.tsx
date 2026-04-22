@@ -4,6 +4,8 @@ import { connection } from "next/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMyProfileContext } from "../actions";
 import { PhoneEditor } from "../phone-editor";
+import { canSubmitOwnDraft } from "@/lib/account/shared";
+import { MemberProfileCard } from "../member-profile-card";
 
 const ROLE_LABELS = {
   admin: "管理员",
@@ -14,10 +16,24 @@ const ROLE_LABELS = {
 async function MyProfileContent({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{
+    phoneError?: string;
+    phoneSuccess?: string;
+    draftError?: string;
+    draftSuccess?: string;
+    historyError?: string;
+    historySuccess?: string;
+  }>;
 }) {
   await connection();
-  const { profile, member } = await getMyProfileContext();
+  const {
+    profile,
+    member,
+    pendingRequest,
+    historyRequests,
+    fatherName,
+    inferredMotherName,
+  } = await getMyProfileContext();
   const params = await searchParams;
 
   if (!profile) {
@@ -25,8 +41,8 @@ async function MyProfileContent({
   }
 
   return (
-    <div className="container mx-auto grid gap-6 px-4 py-8 lg:grid-cols-2">
-      <Card>
+    <div className="container mx-auto grid gap-6 px-4 py-8 lg:grid-cols-2 lg:items-stretch">
+      <Card className="h-full">
         <CardHeader>
           <CardTitle>账号资料</CardTitle>
         </CardHeader>
@@ -35,28 +51,50 @@ async function MyProfileContent({
           <p>角色：{ROLE_LABELS[profile.role]}</p>
           <p>状态：{profile.status === "approved" ? "已通过" : profile.status === "pending" ? "待审核" : "已拒绝"}</p>
           <p>身份证号：{profile.id_card_masked}</p>
-          <PhoneEditor phone={profile.phone} error={params.error} success={params.success} />
+          <PhoneEditor
+            phone={profile.phone}
+            error={params.phoneError}
+            success={params.phoneSuccess}
+          />
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>绑定成员</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          {member ? (
-            <>
-              <p>姓名：{String(member.name)}</p>
-              <p>世代：{member.generation ? `第${member.generation}世` : "未填写"}</p>
-              <p>配偶：{String(member.spouse || "未填写")}</p>
-              <p>居住地：{String(member.residence_place || "未填写")}</p>
-              <p>官职：{String(member.official_position || "未填写")}</p>
-            </>
-          ) : (
+      {member ? (
+        <MemberProfileCard
+          member={{
+            name: String(member.name),
+            generation: member.generation,
+            sibling_order: member.sibling_order,
+            fatherName,
+            inferredMotherName,
+            spouse: member.spouse,
+            residence_place: member.residence_place,
+            official_position: member.official_position,
+            gender: member.gender,
+            is_alive: member.is_alive,
+            birthday: member.birthday,
+            death_date: member.death_date,
+            remarks: member.remarks,
+          }}
+          pendingPayload={pendingRequest?.payload}
+          hasPendingRequest={Boolean(pendingRequest)}
+          historyRequests={historyRequests}
+          canEdit={canSubmitOwnDraft(profile)}
+          error={params.draftError}
+          success={params.draftSuccess}
+          historyError={params.historyError}
+          historySuccess={params.historySuccess}
+        />
+      ) : (
+        <Card className="h-full">
+          <CardHeader>
+            <CardTitle>绑定成员</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
             <p className="text-muted-foreground">当前账号尚未绑定族谱成员，请联系管理员处理。</p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -64,7 +102,14 @@ async function MyProfileContent({
 export default function MyProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{
+    phoneError?: string;
+    phoneSuccess?: string;
+    draftError?: string;
+    draftSuccess?: string;
+    historyError?: string;
+    historySuccess?: string;
+  }>;
 }) {
   return (
     <Suspense fallback={<div className="container mx-auto h-64 px-4 py-8" />}>

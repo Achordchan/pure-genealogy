@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -32,11 +33,11 @@ import {
 import { Plus, Trash2, Search, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import type { FamilyMember } from "./actions";
 import {
-  createFamilyMember,
-  updateFamilyMember,
   deleteFamilyMembers,
   fetchAllMembersForSelect,
+  fetchEditableMemberById,
   fetchMemberById,
+  saveFamilyMemberWithAccount,
 } from "./actions";
 import { ImportMembersDialog } from "./import-members-dialog";
 import { MemberAssetsPanel } from "./member-assets-panel";
@@ -44,6 +45,9 @@ import { FatherCombobox } from "./father-combobox";
 import { RichTextEditor } from "@/components/rich-text/editor";
 import { RichTextViewer } from "@/components/rich-text/viewer";
 import { cn } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
+import { AppDialogShell } from "@/components/app-dialog-shell";
 
 interface FamilyMembersTableProps {
   initialData: FamilyMember[];
@@ -53,6 +57,7 @@ interface FamilyMembersTableProps {
   searchQuery: string;
   canDelete: boolean;
   canImport: boolean;
+  canManageAccounts: boolean;
 }
 
 export function FamilyMembersTable({
@@ -63,6 +68,7 @@ export function FamilyMembersTable({
   searchQuery,
   canDelete,
   canImport,
+  canManageAccounts,
 }: FamilyMembersTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -75,9 +81,14 @@ export function FamilyMembersTable({
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isLoadingParents, setIsLoadingParents] = React.useState(false);
   const [loadingFatherId, setLoadingFatherId] = React.useState<number | null>(null);
+  const [isLoadingMemberDetail, setIsLoadingMemberDetail] = React.useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = React.useState(false);
+  const [isAccountResetConfirmOpen, setIsAccountResetConfirmOpen] = React.useState(false);
+  const [formError, setFormError] = React.useState<string | null>(null);
 
   const [editingMember, setEditingMember] = React.useState<FamilyMember | null>(null);
   const [biographyMember, setBiographyMember] = React.useState<FamilyMember | null>(null);
+  const [pendingSavePayload, setPendingSavePayload] = React.useState<Parameters<typeof saveFamilyMemberWithAccount>[0] | null>(null);
   const [parentOptions, setParentOptions] = React.useState<
     { id: number; name: string; generation: number | null }[]
   >([]);
@@ -97,8 +108,18 @@ export function FamilyMembersTable({
     death_date: "",
     residence_place: "",
   });
+  const [accountForm, setAccountForm] = React.useState({
+    phone: "",
+    idCard: "",
+    accountRole: "member" as "member" | "editor",
+    hasAccount: false,
+    currentRole: "" as "" | "member" | "editor" | "admin",
+  });
 
   const totalPages = Math.ceil(totalCount / pageSize);
+  const memberFormRowClass = "grid grid-cols-[104px_minmax(0,1fr)] items-center gap-4";
+  const memberFormTopRowClass = "grid grid-cols-[104px_minmax(0,1fr)] items-start gap-4";
+  const memberFormLabelClass = "text-right";
 
   // 判断是否为编辑模式
   const isEditMode = editingMember !== null;
@@ -156,22 +177,7 @@ export function FamilyMembersTable({
 
   const handleDelete = async () => {
     if (selectedIds.size === 0) return;
-
-    const confirmed = window.confirm(
-      `确定要删除选中的 ${selectedIds.size} 条记录吗？`
-    );
-    if (!confirmed) return;
-
-    setIsDeleting(true);
-    const result = await deleteFamilyMembers(Array.from(selectedIds));
-    setIsDeleting(false);
-
-    if (result.success) {
-      setSelectedIds(new Set());
-      router.refresh();
-    } else {
-      alert(`删除失败: ${result.error}`);
-    }
+    setIsDeleteConfirmOpen(true);
   };
 
   const resetForm = () => {
@@ -189,17 +195,20 @@ export function FamilyMembersTable({
       death_date: "",
       residence_place: "",
     });
+    setAccountForm({
+      phone: "",
+      idCard: "",
+      accountRole: "member",
+      hasAccount: false,
+      currentRole: "",
+    });
     setEditingMember(null);
+    setIsLoadingMemberDetail(false);
+    setFormError(null);
+    setPendingSavePayload(null);
   };
 
-  // 打开新增弹窗
-  const handleOpenAddDialog = () => {
-    resetForm();
-    setIsDialogOpen(true);
-  };
-
-  // 打开编辑弹窗
-  const handleOpenEditDialog = (member: FamilyMember) => {
+  const fillMemberForm = (member: FamilyMember) => {
     setEditingMember(member);
     setFormData({
       name: member.name,
@@ -215,7 +224,41 @@ export function FamilyMembersTable({
       death_date: member.death_date ?? "",
       residence_place: member.residence_place ?? "",
     });
+  };
+
+  // 打开新增弹窗
+  const handleOpenAddDialog = () => {
+    resetForm();
     setIsDialogOpen(true);
+  };
+
+  // 打开编辑弹窗
+  const handleOpenEditDialog = async (member: FamilyMember) => {
+    resetForm();
+    fillMemberForm(member);
+    setIsDialogOpen(true);
+
+    if (!canManageAccounts) {
+      return;
+    }
+
+    setIsLoadingMemberDetail(true);
+    const detail = await fetchEditableMemberById(member.id);
+    setIsLoadingMemberDetail(false);
+
+    if (!detail) {
+      return;
+    }
+
+    fillMemberForm(detail);
+    setAccountForm({
+      idCard: detail.account_profile?.id_card_value ?? "",
+      phone: detail.account_profile?.phone ?? "",
+      accountRole:
+        detail.account_profile?.role === "editor" ? "editor" : "member",
+      hasAccount: Boolean(detail.account_profile),
+      currentRole: detail.account_profile?.role ?? "",
+    });
   };
 
   // 关闭弹窗
@@ -224,15 +267,66 @@ export function FamilyMembersTable({
     resetForm();
   };
 
+  const saveMember = async (payload: Parameters<typeof saveFamilyMemberWithAccount>[0]) => {
+    setIsSubmitting(true);
+    setFormError(null);
+
+    const request = saveFamilyMemberWithAccount(payload).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error || "保存失败");
+      }
+      return result;
+    });
+
+    toast.promise(request, {
+      loading: isEditMode ? "正在保存成员信息..." : "正在创建成员...",
+      success: isEditMode ? "成员信息已更新" : "成员已创建",
+      error: (error) => error instanceof Error ? error.message : "保存失败",
+    });
+
+    try {
+      await request;
+      handleCloseDialog();
+      router.refresh();
+    } finally {
+      setIsSubmitting(false);
+      setPendingSavePayload(null);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    const request = deleteFamilyMembers(Array.from(selectedIds)).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error || "删除失败");
+      }
+      return result;
+    });
+
+    toast.promise(request, {
+      loading: "正在删除成员...",
+      success: "成员已删除",
+      error: (error) => error instanceof Error ? error.message : "删除失败",
+    });
+
+    try {
+      await request;
+      setSelectedIds(new Set());
+      setIsDeleteConfirmOpen(false);
+      router.refresh();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleSubmitMember = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.name.trim()) {
-      alert("请输入姓名");
+      setFormError("请输入姓名");
       return;
     }
-
-    setIsSubmitting(true);
+    setFormError(null);
 
     const memberData = {
       name: formData.name.trim(),
@@ -253,18 +347,29 @@ export function FamilyMembersTable({
       residence_place: formData.residence_place || null,
     };
 
-    const result = isEditMode && editingMember
-      ? await updateFamilyMember({ ...memberData, id: editingMember.id })
-      : await createFamilyMember(memberData);
+    const payload = {
+      ...(isEditMode && editingMember ? { id: editingMember.id } : {}),
+      ...memberData,
+      account: canManageAccounts && accountForm.currentRole !== "admin"
+        ? {
+            idCard: accountForm.idCard.trim() || undefined,
+            phone: accountForm.idCard.trim() ? accountForm.phone.trim() || null : null,
+            accountRole: accountForm.accountRole,
+          }
+        : undefined,
+    };
 
-    setIsSubmitting(false);
-
-    if (result.success) {
-      handleCloseDialog();
-      router.refresh();
-    } else {
-      alert(`${isEditMode ? "更新" : "添加"}失败: ${result.error}`);
+    if (
+      accountForm.hasAccount &&
+      accountForm.currentRole !== "admin" &&
+      !accountForm.idCard.trim()
+    ) {
+      setPendingSavePayload(payload);
+      setIsAccountResetConfirmOpen(true);
+      return;
     }
+
+    await saveMember(payload);
   };
 
   const allSelected =
@@ -311,7 +416,7 @@ export function FamilyMembersTable({
 
       {/* 新增/编辑弹窗 */}
       <Dialog open={isDialogOpen} onOpenChange={(open) => !open && handleCloseDialog()}>
-        <DialogContent 
+        <DialogContent
           className="sm:max-w-[600px] max-h-[90vh] flex flex-col p-0 gap-0"
           onInteractOutside={(e) => e.preventDefault()}
           onOpenAutoFocus={(e) => e.preventDefault()}
@@ -322,243 +427,336 @@ export function FamilyMembersTable({
               填写成员信息后点击保存
             </DialogDescription>
           </DialogHeader>
-          
-          <form onSubmit={handleSubmitMember} className="flex flex-col flex-1 overflow-hidden">
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="grid gap-4">
-                {/* 姓名 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="name" className="text-right">
-                    姓名 *
-                  </Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
-                    className="col-span-3"
-                    required
-                  />
-                </div>
 
-                {/* 父亲 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="father_id" className="text-right">
-                    父亲
-                  </Label>
-                  <div className="col-span-3">
-                    <FatherCombobox
-                      value={formData.father_id}
-                      options={parentOptions}
-                      isLoading={isLoadingParents}
-                      onChange={(value) => {
-                        const father = parentOptions.find(p => p.id.toString() === value);
-                        const newGeneration = father && father.generation !== null 
-                          ? (father.generation + 1).toString() 
-                          : (value === "null" ? "" : formData.generation);
-                        setFormData({ 
-                          ...formData, 
-                          father_id: value, 
-                          generation: newGeneration 
-                        });
-                      }}
+          <form id="family-member-form" onSubmit={handleSubmitMember} className="flex flex-col flex-1 overflow-hidden">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="space-y-4">
+                {formError ? (
+                  <Alert variant="destructive">
+                    <AlertDescription>{formError}</AlertDescription>
+                  </Alert>
+                ) : null}
+                <div className="grid gap-4">
+                  {/* 姓名 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="name" className={memberFormLabelClass}>
+                      姓名 *
+                    </Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) =>
+                        setFormData({ ...formData, name: e.target.value })
+                      }
+                      required
                     />
                   </div>
-                </div>
 
-                {/* 世代 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="generation" className="text-right">
-                    世代
-                  </Label>
-                  <Input
-                    id="generation"
-                    type="number"
-                    value={formData.generation}
-                    onChange={(e) =>
-                      setFormData({ ...formData, generation: e.target.value })
-                    }
-                    className="col-span-3"
-                    disabled={!!formData.father_id && formData.father_id !== "null"}
-                  />
-                </div>
+                  {/* 父亲 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="father_id" className={memberFormLabelClass}>
+                      父亲
+                    </Label>
+                    <div>
+                      <FatherCombobox
+                        value={formData.father_id}
+                        options={parentOptions}
+                        isLoading={isLoadingParents}
+                        onChange={(value) => {
+                          const father = parentOptions.find(p => p.id.toString() === value);
+                          const newGeneration = father && father.generation !== null
+                            ? (father.generation + 1).toString()
+                            : (value === "null" ? "" : formData.generation);
+                          setFormData({
+                            ...formData,
+                            father_id: value,
+                            generation: newGeneration
+                          });
+                        }}
+                      />
+                    </div>
+                  </div>
 
-                {/* 排行 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="sibling_order" className="text-right">
-                    排行
-                  </Label>
-                  <Input
-                    id="sibling_order"
-                    type="number"
-                    value={formData.sibling_order}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        sibling_order: e.target.value,
-                      })
-                    }
-                    className="col-span-3"
-                  />
-                </div>
+                  {/* 世代 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="generation" className={memberFormLabelClass}>
+                      世代
+                    </Label>
+                    <Input
+                      id="generation"
+                      type="number"
+                      value={formData.generation}
+                      onChange={(e) =>
+                        setFormData({ ...formData, generation: e.target.value })
+                      }
+                      disabled={!!formData.father_id && formData.father_id !== "null"}
+                    />
+                  </div>
 
-                {/* 性别 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="gender" className="text-right">
-                    性别
-                  </Label>
-                  <Select
-                    value={formData.gender}
-                    onValueChange={(value) =>
-                      setFormData({ ...formData, gender: value })
-                    }
-                  >
-                    <SelectTrigger className="col-span-3">
-                      <SelectValue placeholder="选择性别" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="男">男</SelectItem>
-                      <SelectItem value="女">女</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* 生日 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="birthday" className="text-right">
-                    生日
-                  </Label>
-                  <Input
-                    id="birthday"
-                    type="date"
-                    value={formData.birthday}
-                    onChange={(e) =>
-                      setFormData({ ...formData, birthday: e.target.value })
-                    }
-                    className="col-span-3"
-                  />
-                </div>
-
-                {/* 居住地 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="residence_place" className="text-right">
-                    居住地
-                  </Label>
-                  <Input
-                    id="residence_place"
-                    value={formData.residence_place}
-                    onChange={(e) =>
-                      setFormData({ ...formData, residence_place: e.target.value })
-                    }
-                    className="col-span-3"
-                  />
-                </div>
-
-                {/* 官职 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="official_position" className="text-right">
-                    官职
-                  </Label>
-                  <Input
-                    id="official_position"
-                    value={formData.official_position}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        official_position: e.target.value,
-                      })
-                    }
-                    className="col-span-3"
-                  />
-                </div>
-
-                {/* 是否在世 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="is_alive" className="text-right">
-                    是否在世
-                  </Label>
-                  <div className="col-span-3 flex items-center space-x-2">
-                    <Checkbox
-                      id="is_alive"
-                      checked={formData.is_alive}
-                      onCheckedChange={(checked) =>
+                  {/* 排行 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="sibling_order" className={memberFormLabelClass}>
+                      排行
+                    </Label>
+                    <Input
+                      id="sibling_order"
+                      type="number"
+                      value={formData.sibling_order}
+                      onChange={(e) =>
                         setFormData({
                           ...formData,
-                          is_alive: checked as boolean,
+                          sibling_order: e.target.value,
                         })
                       }
                     />
-                    <Label htmlFor="is_alive" className="font-normal">
-                      在世
-                    </Label>
                   </div>
-                </div>
 
-                {/* 卒年 (仅去世可选) */}
-                {!formData.is_alive && (
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="death_date" className="text-right">
-                      卒年
+                  {/* 性别 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="gender" className={memberFormLabelClass}>
+                      性别
+                    </Label>
+                    <Select
+                      value={formData.gender}
+                      onValueChange={(value) =>
+                        setFormData({ ...formData, gender: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择性别" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="男">男</SelectItem>
+                        <SelectItem value="女">女</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* 生日 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="birthday" className={memberFormLabelClass}>
+                      生日
                     </Label>
                     <Input
-                      id="death_date"
+                      id="birthday"
                       type="date"
-                      value={formData.death_date}
+                      value={formData.birthday}
                       onChange={(e) =>
-                        setFormData({ ...formData, death_date: e.target.value })
+                        setFormData({ ...formData, birthday: e.target.value })
                       }
-                      className="col-span-3"
                     />
                   </div>
-                )}
 
-                {/* 配偶 */}
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="spouse" className="text-right">
-                    配偶
-                  </Label>
-                  <Input
-                    id="spouse"
-                    value={formData.spouse}
-                    onChange={(e) =>
-                      setFormData({ ...formData, spouse: e.target.value })
-                    }
-                    className="col-span-3"
-                  />
-                </div>
-
-                {/* 备注 / 生平事迹 */}
-                <div className="grid grid-cols-4 items-start gap-4">
-                  <Label htmlFor="remarks" className="text-right pt-2">
-                    生平事迹
-                  </Label>
-                  <div className="col-span-3">
-                    <RichTextEditor
-                      value={formData.remarks}
-                      onChange={(value) =>
-                        setFormData({ ...formData, remarks: value })
+                  {/* 居住地 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="residence_place" className={memberFormLabelClass}>
+                      居住地
+                    </Label>
+                    <Input
+                      id="residence_place"
+                      value={formData.residence_place}
+                      onChange={(e) =>
+                        setFormData({ ...formData, residence_place: e.target.value })
                       }
-                      maxLength={500}
                     />
                   </div>
-                </div>
 
-                <div className="grid grid-cols-4 items-start gap-4">
-                  <Label className="text-right pt-2">资料附件</Label>
-                  <div className="col-span-3">
-                    {editingMember ? (
-                      <MemberAssetsPanel memberId={editingMember.id} canUpload compact />
-                    ) : (
-                      <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-                        请先保存成员信息，再上传头像或资料图片。
+                  {/* 官职 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="official_position" className={memberFormLabelClass}>
+                      官职
+                    </Label>
+                    <Input
+                      id="official_position"
+                      value={formData.official_position}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          official_position: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+
+                  {/* 是否在世 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="is_alive" className={memberFormLabelClass}>
+                      是否在世
+                    </Label>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="is_alive"
+                        checked={formData.is_alive}
+                        onCheckedChange={(checked) =>
+                          setFormData({
+                            ...formData,
+                            is_alive: checked as boolean,
+                          })
+                        }
+                      />
+                      <Label htmlFor="is_alive" className="font-normal">
+                        在世
+                      </Label>
+                    </div>
+                  </div>
+
+                  {/* 卒年 (仅去世可选) */}
+                  {!formData.is_alive && (
+                    <div className={memberFormRowClass}>
+                      <Label htmlFor="death_date" className={memberFormLabelClass}>
+                        卒年
+                      </Label>
+                      <Input
+                        id="death_date"
+                        type="date"
+                        value={formData.death_date}
+                        onChange={(e) =>
+                          setFormData({ ...formData, death_date: e.target.value })
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {/* 配偶 */}
+                  <div className={memberFormRowClass}>
+                    <Label htmlFor="spouse" className={memberFormLabelClass}>
+                      配偶
+                    </Label>
+                    <Input
+                      id="spouse"
+                      value={formData.spouse}
+                      onChange={(e) =>
+                        setFormData({ ...formData, spouse: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  {canManageAccounts ? (
+                    <>
+                      <div className={memberFormTopRowClass}>
+                        <Label className={`${memberFormLabelClass} pt-3`}>登录资料</Label>
+                        <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-4">
+                          <div className="mb-4 text-sm text-muted-foreground">
+                            {isLoadingMemberDetail ? (
+                              <span className="inline-flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                正在加载当前账号信息
+                              </span>
+                            ) : accountForm.hasAccount ? (
+                              <span>
+                                已开通，当前角色：
+                                {accountForm.currentRole === "editor"
+                                  ? "编辑员"
+                                  : accountForm.currentRole === "admin"
+                                    ? "管理员"
+                                    : "普通用户"}
+                              </span>
+                            ) : (
+                              <span>未开通，填写身份证号后可直接创建可登录账号。</span>
+                            )}
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-4">
+                              <Label htmlFor="account-id-card">身份证号</Label>
+                              <Input
+                                id="account-id-card"
+                                value={accountForm.idCard}
+                                onChange={(e) =>
+                                  setAccountForm((prev) => ({
+                                    ...prev,
+                                    idCard: e.target.value,
+                                    phone: e.target.value.trim() ? prev.phone : "",
+                                  }))
+                                }
+                                placeholder="填写18位身份证号"
+                                disabled={isLoadingMemberDetail || accountForm.currentRole === "admin"}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-4">
+                              <Label htmlFor="account-phone">手机号</Label>
+                              <Input
+                                id="account-phone"
+                                value={accountForm.phone}
+                                onChange={(e) =>
+                                  setAccountForm((prev) => ({
+                                    ...prev,
+                                    phone: e.target.value,
+                                  }))
+                                }
+                                placeholder="11位手机号"
+                                disabled={isLoadingMemberDetail || accountForm.currentRole === "admin" || !accountForm.idCard.trim()}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-4">
+                              <Label htmlFor="account-role">账号角色</Label>
+                              <div>
+                                {accountForm.currentRole === "admin" ? (
+                                  <div className="h-10 rounded-md border bg-muted/30 px-3 text-sm leading-10 text-muted-foreground">
+                                    管理员账号不可在成员弹窗中调整
+                                  </div>
+                                ) : (
+                                  <Select
+                                    value={accountForm.accountRole}
+                                    onValueChange={(value: "member" | "editor") =>
+                                      setAccountForm((prev) => ({
+                                        ...prev,
+                                        accountRole: value,
+                                      }))
+                                    }
+                                    disabled={isLoadingMemberDetail || !accountForm.idCard.trim()}
+                                  >
+                                    <SelectTrigger id="account-role" className="w-full">
+                                      <SelectValue placeholder="选择账号角色" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="member">普通用户</SelectItem>
+                                      <SelectItem value="editor">编辑员</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    )}
+                    </>
+                  ) : null}
+
+                  {/* 备注 / 生平事迹 */}
+                  <div className={memberFormTopRowClass}>
+                    <Label htmlFor="remarks" className={`${memberFormLabelClass} pt-2`}>
+                      生平事迹
+                    </Label>
+                    <div>
+                      <RichTextEditor
+                        value={formData.remarks}
+                        onChange={(value) =>
+                          setFormData({ ...formData, remarks: value })
+                        }
+                        maxLength={500}
+                      />
+                    </div>
+                  </div>
+
+                  <div className={memberFormTopRowClass}>
+                    <Label className={`${memberFormLabelClass} pt-2`}>资料附件</Label>
+                    <div>
+                      {editingMember ? (
+                        <MemberAssetsPanel memberId={editingMember.id} canUpload compact />
+                      ) : (
+                        <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                          请先保存成员信息，再上传头像或资料图片。
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-            
+
             <DialogFooter className="px-6 py-4 border-t mt-auto">
               <Button
                 type="button"
@@ -567,8 +765,8 @@ export function FamilyMembersTable({
               >
                 取消
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <Button type="submit" form="family-member-form" disabled={isSubmitting || isLoadingMemberDetail}>
+                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 {isSubmitting ? "保存中..." : "保存"}
               </Button>
             </DialogFooter>
@@ -749,15 +947,36 @@ export function FamilyMembersTable({
 
       {/* 生平事迹查看弹窗 */}
       <Dialog open={!!biographyMember} onOpenChange={(open) => !open && setBiographyMember(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{biographyMember?.name} 的生平事迹</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-             <RichTextViewer value={biographyMember?.remarks ?? null} />
-          </div>
-        </DialogContent>
+        <AppDialogShell
+          title={`${biographyMember?.name ?? ""} 的生平事迹`}
+          contentClassName="sm:max-w-3xl"
+          bodyClassName="py-2"
+        >
+          <RichTextViewer value={biographyMember?.remarks ?? null} />
+        </AppDialogShell>
       </Dialog>
+      <ConfirmActionDialog
+        open={isDeleteConfirmOpen}
+        onOpenChange={setIsDeleteConfirmOpen}
+        title={`确定删除选中的 ${selectedIds.size} 名成员吗？`}
+        description="删除后将从成员列表中移除，若关联业务数据也会一起失效。此操作不可恢复。"
+        confirmText="确认删除"
+        isPending={isDeleting}
+        onConfirm={handleConfirmDelete}
+      />
+      <ConfirmActionDialog
+        open={isAccountResetConfirmOpen}
+        onOpenChange={setIsAccountResetConfirmOpen}
+        title="确定清空该成员的登录资料吗？"
+        description="保存后会删除该成员的登录账号，并同时清空手机号。后续若要登录，需要重新填写身份证号开通。"
+        confirmText="确认清空"
+        isPending={isSubmitting}
+        onConfirm={async () => {
+          if (!pendingSavePayload) return;
+          setIsAccountResetConfirmOpen(false);
+          await saveMember(pendingSavePayload);
+        }}
+      />
     </div>
   );
 }

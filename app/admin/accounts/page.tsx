@@ -15,6 +15,7 @@ import { canManageAccounts } from "@/lib/account/shared";
 import { Badge } from "@/components/ui/badge";
 import { BackendPageHeader } from "@/components/backend-page-header";
 import { Button } from "@/components/ui/button";
+import { FlashToast } from "@/components/flash-toast";
 import {
   Table,
   TableBody,
@@ -23,15 +24,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { consumeFlashMessage } from "@/lib/flash";
 
-async function AccountsContent({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; success?: string }>;
-}) {
+async function AccountsContent() {
   await connection();
   const profile = await getCurrentAccountProfile();
-  const params = await searchParams;
+  const flash = await consumeFlashMessage();
 
   if (!profile) {
     redirect("/auth/login");
@@ -49,14 +47,12 @@ async function AccountsContent({
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">
+      <FlashToast flash={flash} />
       <BackendPageHeader
         title="账号审核"
-        description="这里处理新注册账号的审核、角色选择和成员绑定。"
+        description="这里处理开放注册用户的审核、角色选择和成员绑定。"
         items={items}
       />
-
-      {params.error && <p className="text-sm text-red-500">{decodeURIComponent(params.error)}</p>}
-      {params.success && <p className="text-sm text-emerald-600">{decodeURIComponent(params.success)}</p>}
 
       <div className="rounded-xl border bg-background">
         <Table>
@@ -145,14 +141,10 @@ async function AccountsContent({
   );
 }
 
-export default function AdminAccountsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; success?: string }>;
-}) {
+export default function AdminAccountsPage() {
   return (
     <Suspense fallback={<div className="container mx-auto h-64 px-4 py-8" />}>
-      <AccountsContent searchParams={searchParams} />
+      <AccountsContent />
     </Suspense>
   );
 }

@@ -22,6 +22,41 @@ export interface FamilyNodeProps {
   data: FamilyNodeData;
 }
 
+function GenderBadge({
+  gender,
+  isAlive,
+}: {
+  gender: "男" | "女";
+  isAlive: boolean;
+}) {
+  const colorClass =
+    gender === "男"
+      ? isAlive
+        ? "text-blue-500"
+        : "text-blue-400/70"
+      : isAlive
+        ? "text-pink-500"
+        : "text-pink-400/70";
+
+  return (
+    <div className={cn("absolute right-3 top-3 flex h-6 w-6 items-center justify-center", colorClass)}>
+      {gender === "男" ? (
+        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="10" cy="14" r="4.5" />
+          <path d="M13.5 10.5L20 4" />
+          <path d="M15.5 4H20v4.5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="9" r="4.5" />
+          <path d="M12 13.5V20" />
+          <path d="M9 17h6" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function FamilyMemberNodeComponent({ data }: FamilyNodeProps) {
   const nodeData = data;
   
@@ -94,6 +129,10 @@ function FamilyMemberNodeComponent({ data }: FamilyNodeProps) {
         position={Position.Top}
         className="!w-3 !h-3 !bg-primary !border-2 !border-background"
       />
+
+      {nodeData.gender ? (
+        <GenderBadge gender={nodeData.gender} isAlive={nodeData.is_alive} />
+      ) : null}
       
       {/* 节点内容 */}
       <div className="flex flex-col items-center gap-1.5 mb-1 w-full">
@@ -107,7 +146,7 @@ function FamilyMemberNodeComponent({ data }: FamilyNodeProps) {
         {/* 配偶信息 - 新增 */}
         {nodeData.spouse && (
           <div className="flex items-center justify-center gap-0.5 w-full -mt-0.5 mb-0.5">
-            <span className="text-[10px] text-muted-foreground/70 whitespace-nowrap select-none">配:</span>
+            <span className="text-[10px] text-muted-foreground/70 whitespace-nowrap select-none">配偶：</span>
             <span 
               className="text-xs text-muted-foreground font-medium truncate max-w-[80%] text-center"
               title={nodeData.spouse}
@@ -129,18 +168,7 @@ function FamilyMemberNodeComponent({ data }: FamilyNodeProps) {
             </Badge>
           )}
         </div>
-        
-        {nodeData.gender && (
-          <span className={cn(
-            "text-xs",
-            nodeData.gender === "男" 
-              ? (nodeData.is_alive ? "text-blue-600 dark:text-blue-400" : "text-blue-800/60 dark:text-blue-300/50") 
-              : (nodeData.is_alive ? "text-pink-600 dark:text-pink-400" : "text-pink-800/60 dark:text-pink-300/50")
-          )}>
-            {nodeData.gender}
-          </span>
-        )}
-        
+
         {!nodeData.is_alive && (
           <span className="text-xs text-muted-foreground/80 italic">已故</span>
         )}

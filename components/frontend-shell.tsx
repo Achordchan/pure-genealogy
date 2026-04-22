@@ -7,10 +7,9 @@ import { AuthButton } from "@/components/auth-button";
 import { BackofficeRealtimeProvider } from "@/components/backoffice-realtime-provider";
 import { FAMILY_SURNAME } from "@/lib/utils";
 import { getBackofficeNoticeCounts, getCurrentAccountProfile } from "@/lib/account/server";
-import { canSubmitOwnDraft } from "@/lib/account/shared";
 
 function getNavigationItems(profile: Awaited<ReturnType<typeof getCurrentAccountProfile>>) {
-  const items = [
+  return [
     { href: "/family-tree/graph", label: "2D 族谱" },
     { href: "/family-tree/graph-3d", label: "3D 族谱" },
     { href: "/family-tree/timeline", label: "时间轴" },
@@ -18,12 +17,6 @@ function getNavigationItems(profile: Awaited<ReturnType<typeof getCurrentAccount
     { href: "/family-tree/biography-book", label: "生平册" },
     { href: "/me/profile", label: "我的资料" },
   ];
-
-  if (profile && canSubmitOwnDraft(profile)) {
-    items.push({ href: "/me/draft", label: "我的草稿" });
-  }
-
-  return items;
 }
 
 async function FrontendShellContent({
@@ -41,7 +34,10 @@ async function FrontendShellContent({
       <div className="min-h-screen flex flex-col">
         <header className="border-b">
           <div className="container mx-auto flex h-16 items-center justify-between px-4">
-            <Link href="/" className="text-lg font-semibold transition-opacity hover:opacity-80">
+            <Link
+              href="/family-tree/graph"
+              className="text-lg font-semibold transition-opacity hover:opacity-80"
+            >
               {FAMILY_SURNAME}氏族谱
             </Link>
 
