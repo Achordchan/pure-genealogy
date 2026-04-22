@@ -1,16 +1,16 @@
+"use client";
+
 import Link from "next/link";
 import { User2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { LogoutButton } from "./logout-button";
 import {
-  getBackofficeNoticeCounts,
-  getCurrentAccountProfile,
-} from "@/lib/account/server";
-import {
+  type AccountProfile,
   canManageAccounts,
   canManageFamilyMembers,
   canReviewMemberChanges,
 } from "@/lib/account/shared";
+import { useBackofficeNoticeCounts } from "./backoffice-realtime-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 function getBackofficeEntryHref(
-  profile: NonNullable<Awaited<ReturnType<typeof getCurrentAccountProfile>>>,
+  profile: Pick<AccountProfile, "role" | "status">,
 ) {
   if (canManageFamilyMembers(profile) || canReviewMemberChanges(profile)) {
     return "/family-tree";
@@ -41,9 +41,11 @@ function formatBadgeCount(count: number) {
   return String(count);
 }
 
-export async function AuthButton() {
-  const profile = await getCurrentAccountProfile();
-
+export function AuthButton({
+  profile,
+}: {
+  profile: Pick<AccountProfile, "real_name" | "role" | "status"> | null;
+}) {
   if (!profile) {
     return (
       <>
@@ -77,7 +79,7 @@ export async function AuthButton() {
   }
 
   const backendHref = getBackofficeEntryHref(profile);
-  const noticeCounts = backendHref ? await getBackofficeNoticeCounts(profile) : null;
+  const noticeCounts = useBackofficeNoticeCounts();
 
   return (
     <>
@@ -90,7 +92,7 @@ export async function AuthButton() {
             <Button asChild size="sm" variant="secondary">
               <Link href={backendHref}>后台管理</Link>
             </Button>
-            {noticeCounts && noticeCounts.total > 0 && (
+            {noticeCounts.total > 0 && (
               <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-red-500 px-1.5 text-center text-[10px] font-semibold leading-5 text-white">
                 {formatBadgeCount(noticeCounts.total)}
               </span>
@@ -114,7 +116,7 @@ export async function AuthButton() {
             <DropdownMenuItem asChild>
               <Link href={backendHref} className="flex w-full items-center justify-between">
                 <span>后台管理</span>
-                {noticeCounts && noticeCounts.total > 0 && (
+                {noticeCounts.total > 0 && (
                   <span className="rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-5 text-white">
                     {formatBadgeCount(noticeCounts.total)}
                   </span>

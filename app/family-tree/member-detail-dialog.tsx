@@ -9,10 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { User, BookOpen, ScrollText, ArrowRight, ArrowLeft, X } from "lucide-react";
 import type { FamilyMemberNode } from "./graph/actions";
 import { RichTextViewer } from "@/components/rich-text/viewer";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { MemberAssetsPanel } from "./member-assets-panel";
 
 interface MemberDetailDialogProps {
   isOpen: boolean;
@@ -159,6 +159,8 @@ export function MemberDetailDialog({
                         {member.residence_place || "未记录"}
                       </p>
                     </div>
+
+                    <MemberAssetsPanel memberId={member.id} canUpload={false} compact />
 
                   </div>
                 </div>

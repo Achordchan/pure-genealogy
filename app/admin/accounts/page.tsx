@@ -9,7 +9,6 @@ import {
 } from "@/app/auth/actions";
 import {
   getBackofficeNavItems,
-  getBackofficeNoticeCounts,
   getCurrentAccountProfile,
 } from "@/lib/account/server";
 import { canManageAccounts } from "@/lib/account/shared";
@@ -46,8 +45,7 @@ async function AccountsContent({
     getPendingAccountsForAdmin(),
     getMemberOptionsForAdmin(),
   ]);
-  const noticeCounts = await getBackofficeNoticeCounts(profile);
-  const items = getBackofficeNavItems(profile, noticeCounts);
+  const items = getBackofficeNavItems(profile);
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">

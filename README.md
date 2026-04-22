@@ -57,7 +57,8 @@
 
 ### 3. 系统功能
 - **身份认证**: 使用“姓名 + 身份证号”注册登录。系统仍通过 Supabase Auth 维护会话，但前台不再使用邮箱登录；新账号默认进入待审核状态。
-- **实时同步**: 多端数据实时更新。
+- **实时同步**: 后台红点、待审核状态、草稿审核状态通过 Supabase Realtime 即时刷新。
+- **资料附件**: 支持为成员上传资料图片，导入源文件会自动归档到 Supabase Storage。
 - **响应式设计**: 完美适配桌面端与移动端，针对移动端优化了导航和工具栏布局，支持明暗主题切换。
 
 ## 📦 快速开始
@@ -99,11 +100,14 @@ NEXT_PUBLIC_FAMILY_SURNAME=陈
   - `status = pending | approved | rejected`
   - `member_id` 用来绑定唯一的族谱成员
 - `member_change_requests` 普通用户资料草稿表
+- `member_assets` 成员资料附件表
 - `RLS = 行级权限控制`
   - 普通用户只能读自己的账号资料、提交自己的资料草稿
   - 编辑员可以新增和修改族谱成员，但不能删除
   - 管理员可以审核账号、分配角色、绑定成员、删除成员
-- `app_current_role()` / `app_is_admin()` / `app_is_editor()` / `app_bound_member_id()` 等数据库辅助函数
+- `app_get_backoffice_notice_counts()` / `app_approve_account()` / `app_reject_account()` / `app_approve_member_change_request()` / `app_reject_member_change_request()` 等 RPC
+- `member-assets` / `genealogy-archives` 两个 Storage bucket
+- `account_profiles` / `member_change_requests` 已加入 `supabase_realtime` publication，用于后台通知和待审核页实时刷新
 
 ### 5. 启动开发服务器
 
@@ -119,9 +123,11 @@ npm run dev
   - 账号审核、账号管理、角色分配、成员绑定
   - 族谱成员增删改查、批量导入
   - 草稿审核
+  - 成员资料图片上传、导入源文件归档
 - `editor`
   - 族谱成员新增和修改
   - 草稿审核
+  - 成员资料图片上传
 - `member`
   - 查看 2D/3D 族谱、时间轴、统计分析、生平册
   - 查看自己的资料

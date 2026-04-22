@@ -203,7 +203,7 @@ export async function updatePendingPhoneAction(formData: FormData) {
 }
 
 async function updatePendingAccountStatus(formData: FormData, status: "approved" | "rejected") {
-  const { supabase, user } = await requireAdminAccount();
+  const { supabase } = await requireAdminAccount();
   const accountId = getFieldValue(formData, "accountId");
   const role = normalizeAccountRole(getFieldValue(formData, "role"));
   const memberIdRaw = getFieldValue(formData, "memberId");
@@ -223,16 +223,20 @@ async function updatePendingAccountStatus(formData: FormData, status: "approved"
     }
   }
 
-  const updates = {
-    status,
-    role: status === "approved" ? role : "member",
-    member_id: status === "approved" ? memberId : null,
-    approved_at: status === "approved" ? new Date().toISOString() : null,
-    approved_by: status === "approved" ? user.id : null,
-    updated_at: new Date().toISOString(),
-  };
+  const rpcName = status === "approved" ? "app_approve_account" : "app_reject_account";
+  const rpcParams =
+    status === "approved"
+      ? {
+          target_profile_id: accountId,
+          target_member_id: memberId,
+          target_role: role,
+        }
+      : {
+          target_profile_id: accountId,
+          review_comment: "",
+        };
 
-  const { error } = await supabase.from("account_profiles").update(updates).eq("id", accountId);
+  const { error } = await supabase.rpc(rpcName, rpcParams);
 
   if (error) {
     redirect(`/admin/accounts?error=${encodeURIComponent(error.message)}`);
@@ -240,6 +244,7 @@ async function updatePendingAccountStatus(formData: FormData, status: "approved"
 
   revalidatePath("/admin/accounts");
   revalidatePath("/admin/accounts/manage");
+  revalidatePath("/auth/pending");
   revalidatePath("/", "layout");
 }
 

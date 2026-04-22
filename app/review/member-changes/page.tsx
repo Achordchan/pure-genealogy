@@ -11,7 +11,6 @@ import {
 } from "./actions";
 import {
   getBackofficeNavItems,
-  getBackofficeNoticeCounts,
   getCurrentAccountProfile,
 } from "@/lib/account/server";
 import { canReviewMemberChanges, DRAFT_EDITABLE_FIELDS } from "@/lib/account/shared";
@@ -51,8 +50,7 @@ async function ReviewMemberChangesContent({
   }
 
   const reviews = await getPendingMemberChangeReviews();
-  const noticeCounts = await getBackofficeNoticeCounts(profile);
-  const items = getBackofficeNavItems(profile, noticeCounts);
+  const items = getBackofficeNavItems(profile);
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LogoutButton } from "@/components/logout-button";
 import { getCurrentPendingProfile, updatePendingPhoneAction } from "../actions";
 import { getAccountHomePath, getPendingStatusText } from "@/lib/account/shared";
+import { PendingStatusListener } from "./pending-status-listener";
 
 async function PendingContent({
   searchParams,
@@ -29,6 +30,7 @@ async function PendingContent({
 
   return (
     <Card>
+      <PendingStatusListener profileId={profile.id} homePath={getAccountHomePath(profile)} />
       <CardHeader>
         <CardTitle className="text-2xl">信息正在审核中</CardTitle>
         <CardDescription>{getPendingStatusText(profile.status)}</CardDescription>

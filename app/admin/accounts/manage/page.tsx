@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   getBackofficeNavItems,
-  getBackofficeNoticeCounts,
   getCurrentAccountProfile,
 } from "@/lib/account/server";
 import { canManageAccounts } from "@/lib/account/shared";
@@ -43,8 +42,7 @@ async function ManageAccountsContent({
     getApprovedAccountsForAdmin(),
     getMemberOptionsForAdmin(),
   ]);
-  const noticeCounts = await getBackofficeNoticeCounts(profile);
-  const items = getBackofficeNavItems(profile, noticeCounts);
+  const items = getBackofficeNavItems(profile);
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">

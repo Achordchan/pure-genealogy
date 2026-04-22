@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireReviewerAccount } from "@/lib/account/server";
 import {
-  DRAFT_EDITABLE_FIELDS,
   type AccountProfile,
   type MemberChangeRequest,
 } from "@/lib/account/shared";
@@ -73,7 +72,7 @@ export async function getPendingMemberChangeReviews() {
 }
 
 async function updateRequestStatus(formData: FormData, status: "approved" | "rejected") {
-  const { supabase, user } = await requireReviewerAccount();
+  const { supabase } = await requireReviewerAccount();
   const requestId = formData.get("requestId");
   const reviewComment = formData.get("reviewComment");
 
@@ -81,50 +80,18 @@ async function updateRequestStatus(formData: FormData, status: "approved" | "rej
     redirect(`/review/member-changes?error=${encodeURIComponent("缺少申请标识")}`);
   }
 
-  const { data: request, error: requestError } = await supabase
-    .from("member_change_requests")
-    .select("*")
-    .eq("id", requestId)
-    .maybeSingle<MemberChangeRequest>();
+  const rpcName =
+    status === "approved"
+      ? "app_approve_member_change_request"
+      : "app_reject_member_change_request";
 
-  if (requestError || !request) {
-    redirect(`/review/member-changes?error=${encodeURIComponent("未找到待审核草稿")}`);
-  }
+  const { error } = await supabase.rpc(rpcName, {
+    target_request_id: requestId,
+    review_comment: typeof reviewComment === "string" ? reviewComment.trim() : "",
+  });
 
-  if (status === "approved") {
-    const updates: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    };
-
-    DRAFT_EDITABLE_FIELDS.forEach((field) => {
-      if (field in request.payload) {
-        updates[field] = request.payload[field] ?? null;
-      }
-    });
-
-    const { error: memberError } = await supabase
-      .from("family_members")
-      .update(updates)
-      .eq("id", request.member_id);
-
-    if (memberError) {
-      redirect(`/review/member-changes?error=${encodeURIComponent(memberError.message)}`);
-    }
-  }
-
-  const { error: statusError } = await supabase
-    .from("member_change_requests")
-    .update({
-      status,
-      review_comment: typeof reviewComment === "string" ? reviewComment.trim() || null : null,
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", request.id);
-
-  if (statusError) {
-    redirect(`/review/member-changes?error=${encodeURIComponent(statusError.message)}`);
+  if (error) {
+    redirect(`/review/member-changes?error=${encodeURIComponent(error.message)}`);
   }
 
   revalidatePath("/review/member-changes");

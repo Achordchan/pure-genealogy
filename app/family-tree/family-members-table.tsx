@@ -39,6 +39,7 @@ import {
   fetchMemberById,
 } from "./actions";
 import { ImportMembersDialog } from "./import-members-dialog";
+import { MemberAssetsPanel } from "./member-assets-panel";
 import { FatherCombobox } from "./father-combobox";
 import { RichTextEditor } from "@/components/rich-text/editor";
 import { RichTextViewer } from "@/components/rich-text/viewer";
@@ -540,6 +541,19 @@ export function FamilyMembersTable({
                       }
                       maxLength={500}
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 items-start gap-4">
+                  <Label className="text-right pt-2">资料附件</Label>
+                  <div className="col-span-3">
+                    {editingMember ? (
+                      <MemberAssetsPanel memberId={editingMember.id} canUpload compact />
+                    ) : (
+                      <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                        请先保存成员信息，再上传头像或资料图片。
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -2,12 +2,14 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  EMPTY_BACKOFFICE_NOTICE_COUNTS,
   canDeleteFamilyMembers,
   canManageAccounts,
   canManageFamilyMembers,
   canReviewMemberChanges,
   canSubmitOwnDraft,
   type AccountProfile,
+  type BackofficeNoticeCounts,
   type AccountRole,
   type AccountStatus,
   buildInternalAccountEmail,
@@ -24,16 +26,9 @@ export interface FamilyMemberOption {
   generation: number | null;
 }
 
-export interface BackofficeNoticeCounts {
-  pendingAccounts: number;
-  pendingMemberChanges: number;
-  total: number;
-}
-
 export interface BackofficeNavItem {
   href: string;
   label: string;
-  badgeCount?: number;
 }
 
 export async function getAccountProfileByAuthUserId(authUserId: string) {
@@ -169,51 +164,23 @@ export async function getBackofficeNoticeCounts(
   profile: Pick<AccountProfile, "role" | "status"> | null,
 ): Promise<BackofficeNoticeCounts> {
   if (!profile) {
-    return {
-      pendingAccounts: 0,
-      pendingMemberChanges: 0,
-      total: 0,
-    };
+    return EMPTY_BACKOFFICE_NOTICE_COUNTS;
   }
 
   const supabase = await createClient();
+  const { data, error } = await supabase
+    .rpc("app_get_backoffice_notice_counts")
+    .single<BackofficeNoticeCounts>();
 
-  const [pendingAccounts, pendingMemberChanges] = await Promise.all([
-    canManageAccounts(profile)
-      ? supabase
-          .from("account_profiles")
-          .select("id", { count: "exact", head: true })
-          .eq("status", "pending")
-      : Promise.resolve({ count: 0, error: null }),
-    canReviewMemberChanges(profile)
-      ? supabase
-          .from("member_change_requests")
-          .select("id", { count: "exact", head: true })
-          .eq("status", "pending")
-      : Promise.resolve({ count: 0, error: null }),
-  ]);
-
-  if (pendingAccounts.error) {
-    throw new Error(pendingAccounts.error.message);
+  if (error) {
+    throw new Error(error.message);
   }
 
-  if (pendingMemberChanges.error) {
-    throw new Error(pendingMemberChanges.error.message);
-  }
-
-  const pendingAccountsCount = pendingAccounts.count ?? 0;
-  const pendingMemberChangesCount = pendingMemberChanges.count ?? 0;
-
-  return {
-    pendingAccounts: pendingAccountsCount,
-    pendingMemberChanges: pendingMemberChangesCount,
-    total: pendingAccountsCount + pendingMemberChangesCount,
-  };
+  return data ?? EMPTY_BACKOFFICE_NOTICE_COUNTS;
 }
 
 export function getBackofficeNavItems(
   profile: Pick<AccountProfile, "role" | "status"> | null,
-  counts: BackofficeNoticeCounts,
 ): BackofficeNavItem[] {
   if (!profile) {
     return [];
@@ -226,23 +193,12 @@ export function getBackofficeNavItems(
   }
 
   if (canReviewMemberChanges(profile)) {
-    items.push({
-      href: "/review/member-changes",
-      label: "草稿审核",
-      badgeCount: counts.pendingMemberChanges,
-    });
+    items.push({ href: "/review/member-changes", label: "草稿审核" });
   }
 
   if (canManageAccounts(profile)) {
-    items.push({
-      href: "/admin/accounts",
-      label: "账号审核",
-      badgeCount: counts.pendingAccounts,
-    });
-    items.push({
-      href: "/admin/accounts/manage",
-      label: "账号管理",
-    });
+    items.push({ href: "/admin/accounts", label: "账号审核" });
+    items.push({ href: "/admin/accounts/manage", label: "账号管理" });
   }
 
   return items;

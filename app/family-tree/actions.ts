@@ -7,6 +7,13 @@ import {
   requireEditorAccount,
 } from "@/lib/account/server";
 import { revalidatePath } from "next/cache";
+import {
+  buildImportArchivePath,
+  buildMemberAssetPath,
+  GENEALOGY_ARCHIVE_BUCKET,
+  MEMBER_ASSET_BUCKET,
+  isImageMimeType,
+} from "@/lib/storage/shared";
 
 export interface FamilyMember {
   id: number;
@@ -378,6 +385,131 @@ export async function batchCreateFamilyMembers(
 
   revalidatePath("/family-tree", "layout");
   return { success: true, count: members.length, error: null };
+}
+
+export async function uploadMemberAssetAction(
+  formData: FormData,
+): Promise<{ success: boolean; error: string | null }> {
+  let path = "";
+
+  try {
+    await requireEditorAccount();
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "当前账号无权上传成员资料",
+    };
+  }
+
+  const memberIdRaw = formData.get("memberId");
+  const file = formData.get("file");
+  const memberId = typeof memberIdRaw === "string" ? Number(memberIdRaw) : NaN;
+
+  if (!Number.isFinite(memberId)) {
+    return { success: false, error: "缺少成员标识" };
+  }
+
+  if (!(file instanceof File) || file.size === 0) {
+    return { success: false, error: "请选择要上传的图片" };
+  }
+
+  if (!isImageMimeType(file.type)) {
+    return { success: false, error: "只支持上传图片文件" };
+  }
+
+  if (file.size > 10 * 1024 * 1024) {
+    return { success: false, error: "图片大小不能超过 10 MB" };
+  }
+
+  const supabase = await createClient();
+  const arrayBuffer = await file.arrayBuffer();
+  path = buildMemberAssetPath(memberId, file.name);
+
+  const { error: uploadError } = await supabase.storage
+    .from(MEMBER_ASSET_BUCKET)
+    .upload(path, arrayBuffer, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    return { success: false, error: uploadError.message };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    await supabase.storage.from(MEMBER_ASSET_BUCKET).remove([path]);
+    return { success: false, error: "登录状态已失效，请重新登录" };
+  }
+
+  const { error: insertError } = await supabase.from("member_assets").insert({
+    member_id: memberId,
+    bucket: MEMBER_ASSET_BUCKET,
+    object_path: path,
+    file_name: file.name,
+    mime_type: file.type,
+    file_size: file.size,
+    uploaded_by: user.id,
+  });
+
+  if (insertError) {
+    await supabase.storage.from(MEMBER_ASSET_BUCKET).remove([path]);
+    return { success: false, error: insertError.message };
+  }
+
+  revalidatePath("/family-tree", "layout");
+  revalidatePath("/family-tree/graph");
+  revalidatePath("/family-tree/graph-3d");
+  revalidatePath("/family-tree/biography-book");
+  return { success: true, error: null };
+}
+
+export async function archiveImportSourceAction(
+  formData: FormData,
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const account = await requireEditorAccount();
+    assertRoleCanDelete(account.profile);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "当前账号无权归档导入文件",
+    };
+  }
+
+  const file = formData.get("file");
+
+  if (!(file instanceof File) || file.size === 0) {
+    return { success: false, error: "缺少导入文件" };
+  }
+
+  if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+    return { success: false, error: "只支持归档 Excel 或 CSV 导入文件" };
+  }
+
+  if (file.size > 25 * 1024 * 1024) {
+    return { success: false, error: "导入文件大小不能超过 25 MB" };
+  }
+
+  const supabase = await createClient();
+  const arrayBuffer = await file.arrayBuffer();
+  const path = buildImportArchivePath(file.name);
+
+  const { error } = await supabase.storage
+    .from(GENEALOGY_ARCHIVE_BUCKET)
+    .upload(path, arrayBuffer, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return { success: true, error: null };
 }
 
 export async function fetchMembersForTimeline(): Promise<

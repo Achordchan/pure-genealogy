@@ -5,7 +5,6 @@ import { BackendPageHeader } from "@/components/backend-page-header";
 import { FamilyMembersLoader } from "./family-members-loader";
 import {
   getBackofficeNavItems,
-  getBackofficeNoticeCounts,
   getCurrentAccountProfile,
 } from "@/lib/account/server";
 
@@ -56,8 +55,7 @@ async function FamilyTreeHeader() {
   if (!profile) {
     redirect("/auth/login");
   }
-  const noticeCounts = await getBackofficeNoticeCounts(profile);
-  const items = getBackofficeNavItems(profile, noticeCounts);
+  const items = getBackofficeNavItems(profile);
 
   return (
     <BackendPageHeader

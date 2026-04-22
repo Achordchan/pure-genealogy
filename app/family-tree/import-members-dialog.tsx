@@ -23,7 +23,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Upload, Download, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { batchCreateFamilyMembers, type ImportMemberInput } from "./actions";
+import {
+  archiveImportSourceAction,
+  batchCreateFamilyMembers,
+  type ImportMemberInput,
+} from "./actions";
 import { FAMILY_SURNAME } from "@/lib/utils";
 
 interface ImportMembersDialogProps {
@@ -34,11 +38,13 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
   const [parsedData, setParsedData] = React.useState<ImportMemberInput[]>([]);
+  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const resetState = () => {
     setParsedData([]);
+    setSelectedFile(null);
     setError(null);
     setIsLoading(false);
     if (fileInputRef.current) {
@@ -80,6 +86,7 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setSelectedFile(file);
     setIsLoading(true);
     setError(null);
 
@@ -131,9 +138,19 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
 
   // 提交导入
   const handleImport = async () => {
-    if (parsedData.length === 0) return;
+    if (parsedData.length === 0 || !selectedFile) return;
 
     setIsLoading(true);
+    const archiveFormData = new FormData();
+    archiveFormData.append("file", selectedFile);
+    const archiveResult = await archiveImportSourceAction(archiveFormData);
+
+    if (!archiveResult.success) {
+      setIsLoading(false);
+      setError(`归档失败: ${archiveResult.error}`);
+      return;
+    }
+
     const result = await batchCreateFamilyMembers(parsedData);
     setIsLoading(false);
 
@@ -234,7 +251,7 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
           <Button variant="outline" onClick={() => setIsOpen(false)}>
             取消
           </Button>
-          <Button onClick={handleImport} disabled={parsedData.length === 0 || isLoading}>
+          <Button onClick={handleImport} disabled={parsedData.length === 0 || !selectedFile || isLoading}>
             {isLoading ? "处理中..." : "确认导入"}
           </Button>
         </DialogFooter>

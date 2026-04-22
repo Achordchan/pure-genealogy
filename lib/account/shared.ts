@@ -45,6 +45,18 @@ export interface MemberChangeRequest {
   updated_at: string;
 }
 
+export interface BackofficeNoticeCounts {
+  pending_accounts: number;
+  pending_member_changes: number;
+  total: number;
+}
+
+export const EMPTY_BACKOFFICE_NOTICE_COUNTS: BackofficeNoticeCounts = {
+  pending_accounts: 0,
+  pending_member_changes: 0,
+  total: 0,
+};
+
 const ID_CARD_REGEX = /^\d{17}[\dX]$/;
 
 export function normalizeRealName(value: string) {
