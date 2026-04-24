@@ -1,28 +1,41 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Loader2, Upload, ImageIcon } from "lucide-react";
+import { Film, ImageIcon, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
-import { MEMBER_ASSET_BUCKET, type MemberAsset, isImageMimeType } from "@/lib/storage/shared";
+import {
+  type MemberAsset,
+  type MemberAssetScope,
+  isImageMimeType,
+  isSupportedMemberAssetMimeType,
+  isVideoMimeType,
+} from "@/lib/storage/shared";
 import { uploadMemberAssetAction } from "./actions";
+import { buildClientApiUrl, clientApiFetch } from "@/lib/api/client";
+import type { ApiMemberAsset } from "@/lib/api/types";
 
 interface DisplayMemberAsset extends MemberAsset {
-  signedUrl: string | null;
+  url: string;
 }
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
+function getAssetDownloadPath(assetId: string) {
+  return buildClientApiUrl(`/api/assets/${assetId}/download`);
+}
+
 export function MemberAssetsPanel({
   memberId,
   canUpload,
   compact = false,
+  assetScope = "profile",
 }: {
   memberId: number;
   canUpload: boolean;
   compact?: boolean;
+  assetScope?: MemberAssetScope;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [assets, setAssets] = useState<DisplayMemberAsset[]>([]);
@@ -37,45 +50,23 @@ export function MemberAssetsPanel({
     async function loadAssets() {
       setIsLoading(true);
       setError(null);
-      const supabase = createClient();
-      const { data, error: selectError } = await supabase
-        .from("member_assets")
-        .select("*")
-        .eq("member_id", memberId)
-        .order("created_at", { ascending: false })
-        .returns<MemberAsset[]>();
-
-      if (!active) {
-        return;
+      try {
+        const { items } = await clientApiFetch<{ items: ApiMemberAsset[] }>(
+          `/api/members/${memberId}/assets?assetScope=${assetScope}`,
+        );
+        if (active) {
+          setAssets(items.map((item) => ({ ...item, url: getAssetDownloadPath(item.id) })));
+        }
+      } catch (error) {
+        if (active) {
+          setError(error instanceof Error ? error.message : "读取附件失败");
+          setAssets([]);
+        }
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
       }
-
-      if (selectError) {
-        setError(selectError.message);
-        setAssets([]);
-        setIsLoading(false);
-        return;
-      }
-
-      const rows = data ?? [];
-      const withUrls = await Promise.all(
-        rows.map(async (item) => {
-          const { data: signedData, error: signedError } = await supabase.storage
-            .from(MEMBER_ASSET_BUCKET)
-            .createSignedUrl(item.object_path, 60 * 60);
-
-          return {
-            ...item,
-            signedUrl: signedError ? null : signedData.signedUrl,
-          };
-        }),
-      );
-
-      if (!active) {
-        return;
-      }
-
-      setAssets(withUrls);
-      setIsLoading(false);
     }
 
     void loadAssets();
@@ -83,47 +74,26 @@ export function MemberAssetsPanel({
     return () => {
       active = false;
     };
-  }, [memberId]);
+  }, [assetScope, memberId]);
 
   const reloadAssets = () => {
     setIsLoading(true);
-    const supabase = createClient();
-    supabase
-      .from("member_assets")
-      .select("*")
-      .eq("member_id", memberId)
-      .order("created_at", { ascending: false })
-      .returns<MemberAsset[]>()
-      .then(async ({ data, error: selectError }) => {
-        if (selectError) {
-          setError(selectError.message);
-          setAssets([]);
-          setIsLoading(false);
-          return;
-        }
-
-        const rows = data ?? [];
-        const withUrls = await Promise.all(
-          rows.map(async (item) => {
-            const { data: signedData, error: signedError } = await supabase.storage
-              .from(MEMBER_ASSET_BUCKET)
-              .createSignedUrl(item.object_path, 60 * 60);
-
-            return {
-              ...item,
-              signedUrl: signedError ? null : signedData.signedUrl,
-            };
-          }),
-        );
-
-        setAssets(withUrls);
-        setIsLoading(false);
-      });
+    clientApiFetch<{ items: ApiMemberAsset[] }>(
+      `/api/members/${memberId}/assets?assetScope=${assetScope}`,
+    )
+      .then(({ items }) => {
+        setAssets(items.map((item) => ({ ...item, url: getAssetDownloadPath(item.id) })));
+      })
+      .catch((error) => {
+        setError(error instanceof Error ? error.message : "读取附件失败");
+        setAssets([]);
+      })
+      .finally(() => setIsLoading(false));
   };
 
   const handleUpload = () => {
     if (!selectedFile) {
-      setError("请先选择图片");
+      setError(assetScope === "ritual" ? "请先选择祭祀附件" : "请先选择图片");
       return;
     }
 
@@ -131,6 +101,7 @@ export function MemberAssetsPanel({
       setError(null);
       const formData = new FormData();
       formData.append("memberId", String(memberId));
+      formData.append("assetScope", assetScope);
       formData.append("file", selectedFile);
       const result = await uploadMemberAssetAction(formData);
 
@@ -153,7 +124,9 @@ export function MemberAssetsPanel({
         <div className="min-w-0">
           <p className="text-sm font-medium">资料附件</p>
           <p className="text-xs text-muted-foreground">
-            支持查看成员图片资料，编辑员和管理员可上传。
+            {assetScope === "ritual"
+              ? "支持查看祭祀图片和视频指引，编辑员和管理员可上传。"
+              : "支持查看成员图片资料，编辑员和管理员可上传。"}
           </p>
         </div>
         {canUpload && (
@@ -161,13 +134,13 @@ export function MemberAssetsPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={assetScope === "ritual" ? "image/*,video/mp4,video/webm,video/quicktime" : "image/*"}
               className="max-w-full text-xs sm:max-w-[280px]"
               onChange={(event) => {
                 const nextFile = event.target.files?.[0] ?? null;
-                if (nextFile && !isImageMimeType(nextFile.type)) {
+                if (nextFile && !isSupportedMemberAssetMimeType(assetScope, nextFile.type)) {
                   setSelectedFile(null);
-                  setError("只支持上传图片文件");
+                  setError(assetScope === "ritual" ? "只支持上传图片或视频文件" : "只支持上传图片文件");
                   event.target.value = "";
                   return;
                 }
@@ -177,7 +150,7 @@ export function MemberAssetsPanel({
             />
             <Button type="button" size="sm" onClick={handleUpload} disabled={!selectedFile || isPending}>
               {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-              上传图片
+              {assetScope === "ritual" ? "上传附件" : "上传图片"}
             </Button>
           </div>
         )}
@@ -192,36 +165,40 @@ export function MemberAssetsPanel({
         </div>
       ) : assets.length === 0 ? (
         <div className="rounded-md border border-dashed bg-background/70 px-4 py-6 text-sm text-muted-foreground">
-          当前还没有上传资料图片
+          {assetScope === "ritual" ? "当前还没有上传祭祀附件" : "当前还没有上传资料图片"}
         </div>
       ) : (
         <div className={compact ? "grid grid-cols-2 gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2"}>
           {assets.map((asset) => (
             <div key={asset.id} className="overflow-hidden rounded-md border bg-background">
               <div className="flex aspect-[4/3] items-center justify-center bg-muted/30">
-                {asset.signedUrl ? (
+                {isImageMimeType(asset.mime_type) ? (
                   <img
-                    src={asset.signedUrl}
+                    src={asset.url}
                     alt={asset.file_name}
                     className="h-full w-full object-cover"
                   />
+                ) : isVideoMimeType(asset.mime_type) ? (
+                  <video
+                    src={asset.url}
+                    className="h-full w-full object-cover"
+                    controls
+                    preload="metadata"
+                  />
                 ) : (
-                  <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                  isVideoMimeType(asset.mime_type) ? (
+                    <Film className="h-8 w-8 text-muted-foreground" />
+                  ) : (
+                    <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                  )
                 )}
               </div>
               <div className="space-y-1 p-3">
                 <p className="line-clamp-2 text-sm font-medium">{asset.file_name}</p>
                 <p className="text-xs text-muted-foreground">{formatDate(asset.created_at)}</p>
-                {asset.signedUrl && (
-                  <a
-                    href={asset.signedUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-primary hover:underline"
-                  >
-                    查看原图
-                  </a>
-                )}
+                <a href={asset.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
+                  {isVideoMimeType(asset.mime_type) ? "查看原视频" : "查看原图"}
+                </a>
               </div>
             </div>
           ))}

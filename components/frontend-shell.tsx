@@ -12,6 +12,7 @@ function getNavigationItems(profile: Awaited<ReturnType<typeof getCurrentAccount
   return [
     { href: "/family-tree/graph", label: "2D 族谱" },
     { href: "/family-tree/graph-3d", label: "3D 族谱" },
+    { href: "/family-tree/rituals", label: "祭祀" },
     { href: "/family-tree/timeline", label: "时间轴" },
     { href: "/family-tree/statistics", label: "统计分析" },
     { href: "/family-tree/biography-book", label: "生平册" },

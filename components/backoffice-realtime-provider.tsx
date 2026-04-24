@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { isGoApiClientEnabled } from "@/lib/api/client";
 import {
   canManageAccounts,
   canReviewMemberChanges,
@@ -21,12 +21,6 @@ const BackofficeNoticeContext = createContext<BackofficeNoticeCounts>(EMPTY_BACK
 
 function clampCount(value: number) {
   return Math.max(0, value);
-}
-
-function getPendingDelta(oldStatus?: string, newStatus?: string) {
-  const wasPending = oldStatus === "pending";
-  const isPending = newStatus === "pending";
-  return Number(isPending) - Number(wasPending);
 }
 
 export function BackofficeRealtimeProvider({
@@ -49,6 +43,10 @@ export function BackofficeRealtimeProvider({
       return;
     }
 
+    if (!isGoApiClientEnabled()) {
+      return;
+    }
+
     const shouldWatchAccounts = canManageAccounts(profile);
     const shouldWatchDrafts = canReviewMemberChanges(profile);
 
@@ -56,76 +54,20 @@ export function BackofficeRealtimeProvider({
       return;
     }
 
-    const supabase = createClient();
-    const channel = supabase.channel(`backoffice-notices:${profile.id}`);
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    const source = new EventSource(new URL("/api/events", baseUrl).toString(), {
+      withCredentials: true,
+    });
 
-    if (shouldWatchAccounts) {
-      channel.on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "account_profiles",
-          filter: "status=in.(pending,approved,rejected)",
-        },
-        (payload) => {
-          const delta = getPendingDelta(
-            payload.eventType === "INSERT" ? undefined : payload.old?.status,
-            payload.eventType === "DELETE" ? undefined : payload.new?.status,
-          );
+    source.addEventListener("notice", (event) => {
+      try {
+        setCounts(JSON.parse(event.data) as BackofficeNoticeCounts);
+      } catch {
+        setCounts(initialCounts);
+      }
+    });
 
-          if (delta === 0) {
-            return;
-          }
-
-          setCounts((current) => {
-            const pending_accounts = clampCount(current.pending_accounts + delta);
-            return {
-              ...current,
-              pending_accounts,
-              total: pending_accounts + current.pending_member_changes,
-            };
-          });
-        },
-      );
-    }
-
-    if (shouldWatchDrafts) {
-      channel.on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "member_change_requests",
-          filter: "status=in.(pending,approved,rejected)",
-        },
-        (payload) => {
-          const delta = getPendingDelta(
-            payload.eventType === "INSERT" ? undefined : payload.old?.status,
-            payload.eventType === "DELETE" ? undefined : payload.new?.status,
-          );
-
-          if (delta === 0) {
-            return;
-          }
-
-          setCounts((current) => {
-            const pending_member_changes = clampCount(current.pending_member_changes + delta);
-            return {
-              ...current,
-              pending_member_changes,
-              total: current.pending_accounts + pending_member_changes,
-            };
-          });
-        },
-      );
-    }
-
-    channel.subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => source.close();
   }, [profile]);
 
   const value = useMemo(() => counts, [counts]);

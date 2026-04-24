@@ -2,8 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  fetchApiMyProfileContext,
+  submitApiMemberChangeDraft,
+  updateApiProfilePhone,
+  withdrawApiMemberChangeDraft,
+} from "@/lib/api/account";
 import {
   getFamilyMemberById,
   requireApprovedAccount,
@@ -18,7 +22,7 @@ import {
 export async function getMyProfileContext() {
   const { profile } = await requireApprovedAccount();
   const member = profile.member_id ? await getFamilyMemberById(profile.member_id) : null;
-  let pendingRequest = null;
+  let pendingRequest: MemberChangeRequest | null = null;
   let historyRequests: MemberChangeRequest[] = [];
   let fatherName: string | null = null;
   let inferredMotherName: string | null = null;
@@ -30,34 +34,9 @@ export async function getMyProfileContext() {
   }
 
   if (canSubmitOwnDraft(profile) && member) {
-    const supabase = await createClient();
-    const [{ data, error }, { data: historyData, error: historyError }] = await Promise.all([
-      supabase
-        .from("member_change_requests")
-        .select("*")
-        .eq("account_profile_id", profile.id)
-        .eq("status", "pending")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<MemberChangeRequest>(),
-      supabase
-        .from("member_change_requests")
-        .select("*")
-        .eq("account_profile_id", profile.id)
-        .order("created_at", { ascending: false })
-        .returns<MemberChangeRequest[]>(),
-    ]);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (historyError) {
-      throw new Error(historyError.message);
-    }
-
-    pendingRequest = data;
-    historyRequests = historyData ?? [];
+    const context = await fetchApiMyProfileContext();
+    pendingRequest = context.pendingRequest;
+    historyRequests = context.historyRequests;
   }
 
   return {
@@ -78,17 +57,12 @@ export async function updateMyPhoneAction(formData: FormData) {
     redirect(`/me/profile?phoneError=${encodeURIComponent("请输入正确的11位手机号")}`);
   }
 
-  const { supabase, profile } = await requireApprovedAccount();
-  const { error } = await supabase
-    .from("account_profiles")
-    .update({
-      phone,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", profile.id);
+  await requireApprovedAccount();
 
-  if (error) {
-    redirect(`/me/profile?phoneError=${encodeURIComponent(error.message)}`);
+  try {
+    await updateApiProfilePhone(phone);
+  } catch (error) {
+    redirect(`/me/profile?phoneError=${encodeURIComponent(error instanceof Error ? error.message : "手机号更新失败")}`);
   }
 
   revalidatePath("/me/profile");
@@ -96,7 +70,7 @@ export async function updateMyPhoneAction(formData: FormData) {
 }
 
 export async function submitMyDraftAction(formData: FormData) {
-  const { supabase, profile } = await requireDraftOwnerAccount();
+  await requireDraftOwnerAccount();
   const payload = sanitizeDraftPayload({
     spouse: formData.get("spouse"),
     birthday: formData.get("birthday"),
@@ -108,37 +82,10 @@ export async function submitMyDraftAction(formData: FormData) {
     remarks: formData.get("remarks"),
   });
 
-  const { data: existingRequest, error: fetchError } = await supabase
-    .from("member_change_requests")
-    .select("id")
-    .eq("account_profile_id", profile.id)
-    .eq("status", "pending")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ id: string }>();
-
-  if (fetchError) {
-    redirect(`/me/profile?draftError=${encodeURIComponent(fetchError.message)}`);
-  }
-
-  const draftRecord = {
-    member_id: profile.member_id,
-    payload,
-    updated_at: new Date().toISOString(),
-  };
-
-  const result = existingRequest
-    ? await supabase
-        .from("member_change_requests")
-        .update(draftRecord)
-        .eq("id", existingRequest.id)
-    : await supabase.from("member_change_requests").insert({
-        account_profile_id: profile.id,
-        ...draftRecord,
-      });
-
-  if (result.error) {
-    redirect(`/me/profile?draftError=${encodeURIComponent(result.error.message)}`);
+  try {
+    await submitApiMemberChangeDraft(payload);
+  } catch (error) {
+    redirect(`/me/profile?draftError=${encodeURIComponent(error instanceof Error ? error.message : "草稿提交失败")}`);
   }
 
   revalidatePath("/me/profile");
@@ -147,41 +94,17 @@ export async function submitMyDraftAction(formData: FormData) {
 }
 
 export async function withdrawMyDraftAction(formData: FormData) {
-  const { profile } = await requireDraftOwnerAccount();
+  await requireDraftOwnerAccount();
   const requestId = formData.get("requestId");
 
   if (typeof requestId !== "string" || !requestId) {
     redirect(`/me/profile?historyError=${encodeURIComponent("缺少变更记录标识")}`);
   }
 
-  const supabase = await createClient();
-  const { data: request, error } = await supabase
-    .from("member_change_requests")
-    .select("*")
-    .eq("id", requestId)
-    .eq("account_profile_id", profile.id)
-    .maybeSingle<MemberChangeRequest>();
-
-    if (error) {
-    redirect(`/me/profile?historyError=${encodeURIComponent(error.message)}`);
-  }
-
-  if (!request) {
-    redirect(`/me/profile?historyError=${encodeURIComponent("未找到该变更记录")}`);
-  }
-
-  if (request.status !== "pending") {
-    redirect(`/me/profile?historyError=${encodeURIComponent("只有待审核记录可以撤回")}`);
-  }
-
-  const adminClient = createAdminClient();
-  const { error: deleteError } = await adminClient
-    .from("member_change_requests")
-    .delete()
-    .eq("id", requestId);
-
-  if (deleteError) {
-    redirect(`/me/profile?historyError=${encodeURIComponent(deleteError.message)}`);
+  try {
+    await withdrawApiMemberChangeDraft(requestId);
+  } catch (error) {
+    redirect(`/me/profile?historyError=${encodeURIComponent(error instanceof Error ? error.message : "撤回失败")}`);
   }
 
   revalidatePath("/me/profile");

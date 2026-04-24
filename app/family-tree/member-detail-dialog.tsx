@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Dialog,
   DialogContent,
@@ -159,6 +160,20 @@ export function MemberDetailDialog({
                         {member.residence_place || "未记录"}
                       </p>
                     </div>
+
+                    {!member.is_alive ? (
+                      <div className="space-y-1">
+                        <span className="text-[10px] sm:text-xs font-bold text-stone-400 dark:text-stone-500 uppercase tracking-wider">祭祀信息</span>
+                        <Button asChild variant="outline" className="mt-1 w-full sm:w-auto">
+                          <Link
+                            href={`/family-tree/rituals?memberId=${member.id}`}
+                            onClick={() => onOpenChange(false)}
+                          >
+                            查看祭祀详情
+                          </Link>
+                        </Button>
+                      </div>
+                    ) : null}
 
                     <MemberAssetsPanel memberId={member.id} canUpload={false} compact />
 

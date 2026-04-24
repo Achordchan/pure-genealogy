@@ -1,24 +1,29 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import {
+  batchCreateApiFamilyMembers,
+  fetchApiFamilyMembers,
+  deleteApiFamilyMembers,
+  fetchApiFamilyMemberById,
+  fetchApiFamilyMemberOptions,
+  fetchApiFamilyMembersPage,
+  fetchApiMemberAccount,
+  saveApiFamilyMember,
+  uploadApiMemberAsset,
+  archiveApiImportSource,
+} from "@/lib/api/family";
 import {
   assertRoleCanDelete,
   requireApprovedAccount,
   requireEditorAccount,
 } from "@/lib/account/server";
+import type { ApiMemberAccountSnapshot } from "@/lib/api/types";
 import { revalidatePath } from "next/cache";
-import { canManageAccounts } from "@/lib/account/shared";
 import {
-  getMemberAccountProfileForAdmin,
-  syncMemberAccountForAdmin,
-  type MemberAccountSnapshot,
-} from "@/lib/account/member-account-sync";
-import {
-  buildImportArchivePath,
-  buildMemberAssetPath,
-  GENEALOGY_ARCHIVE_BUCKET,
-  MEMBER_ASSET_BUCKET,
+  type MemberAssetScope,
   isImageMimeType,
+  isSupportedMemberAssetMimeType,
+  isVideoMimeType,
 } from "@/lib/storage/shared";
 
 export interface FamilyMember {
@@ -48,66 +53,21 @@ export interface FetchMembersResult {
 export async function fetchFamilyMembers(
   page: number = 1,
   pageSize: number = 50,
-  searchQuery: string = ""
+  searchQuery: string = "",
 ): Promise<FetchMembersResult> {
   try {
     await requireEditorAccount();
+    const result = await fetchApiFamilyMembersPage({ page, pageSize, searchQuery });
+    return { data: result.data, count: result.count, error: null };
   } catch (error) {
     return {
       data: [],
       count: 0,
-      error: error instanceof Error ? error.message : "当前账号无权访问",
+      error: error instanceof Error ? error.message : "读取成员失败",
     };
   }
-
-  const supabase = await createClient();
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-
-  let query = supabase
-    .from("family_members")
-    .select("*", { count: "exact" });
-
-  if (searchQuery.trim()) {
-    query = query.ilike("name", `%${searchQuery.trim()}%`);
-  }
-
-  const { data, count, error } = await query
-    .order("generation", { ascending: true })
-    .order("sibling_order", { ascending: true })
-    .range(from, to);
-
-  if (error) {
-    return { data: [], count: 0, error: error.message };
-  }
-
-  // 获取所有父亲 ID
-  const fatherIds = (data || [])
-    .map((item) => item.father_id)
-    .filter((id): id is number => id !== null);
-
-  // 批量查询父亲姓名
-  let fatherMap: Record<number, string> = {};
-  if (fatherIds.length > 0) {
-    const { data: fathers } = await supabase
-      .from("family_members")
-      .select("id, name")
-      .in("id", fatherIds);
-
-    if (fathers) {
-      fatherMap = Object.fromEntries(fathers.map((f) => [f.id, f.name]));
-    }
-  }
-
-  // 转换数据格式，添加 father_name
-  const transformedData: FamilyMember[] = (data || []).map((item) => ({
-    ...item,
-    father_name: item.father_id ? fatherMap[item.father_id] || null : null,
-  }));
-
-  return { data: transformedData, count: count || 0, error: null };
 }
+
 
 export interface CreateMemberInput {
   name: string;
@@ -137,52 +97,29 @@ export interface SaveFamilyMemberInput extends CreateMemberInput {
 }
 
 export interface EditableFamilyMember extends FamilyMember {
-  account_profile: MemberAccountSnapshot | null;
+  account_profile: ApiMemberAccountSnapshot | null;
 }
 
 async function persistFamilyMember(input: SaveFamilyMemberInput) {
-  const supabase = await createClient();
-  const payload = {
+  const result = await saveApiFamilyMember({
+    id: input.id,
     name: input.name,
-    generation: input.generation,
-    sibling_order: input.sibling_order,
-    father_id: input.father_id,
-    gender: input.gender,
-    official_position: input.official_position,
+    generation: input.generation ?? null,
+    sibling_order: input.sibling_order ?? null,
+    father_id: input.father_id ?? null,
+    gender: input.gender ?? null,
+    official_position: input.official_position ?? null,
     is_alive: input.is_alive ?? true,
-    spouse: input.spouse,
-    remarks: input.remarks,
-    birthday: input.birthday,
-    death_date: input.death_date,
-    residence_place: input.residence_place,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (input.id) {
-    const { error } = await supabase
-      .from("family_members")
-      .update(payload)
-      .eq("id", input.id);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return { memberId: input.id, isNew: false };
-  }
-
-  const { data, error } = await supabase
-    .from("family_members")
-    .insert(payload)
-    .select("id")
-    .single<{ id: number }>();
-
-  if (error || !data) {
-    throw new Error(error?.message ?? "创建成员失败");
-  }
-
-  return { memberId: data.id, isNew: true };
+    spouse: input.spouse ?? null,
+    remarks: input.remarks ?? null,
+    birthday: input.birthday ?? null,
+    death_date: input.death_date ?? null,
+    residence_place: input.residence_place ?? null,
+    account: input.account,
+  });
+  return { memberId: result.data.id, isNew: !input.id };
 }
+
 
 export async function saveFamilyMemberWithAccount(
   input: SaveFamilyMemberInput,
@@ -190,26 +127,11 @@ export async function saveFamilyMemberWithAccount(
   let createdMemberId: number | null = null;
 
   try {
-    const account = await requireEditorAccount();
+    await requireEditorAccount();
     const { memberId, isNew } = await persistFamilyMember(input);
 
     if (isNew) {
       createdMemberId = memberId;
-    }
-
-    if (input.account) {
-      if (!canManageAccounts(account.profile)) {
-        throw new Error("仅管理员可以维护登录资料");
-      }
-
-      await syncMemberAccountForAdmin({
-        memberId,
-        realName: input.name,
-        approvedBy: account.user.id,
-        idCard: input.account.idCard,
-        phone: input.account.phone,
-        role: input.account.accountRole,
-      });
     }
 
     revalidatePath("/family-tree", "layout");
@@ -219,8 +141,7 @@ export async function saveFamilyMemberWithAccount(
     return { success: true, error: null };
   } catch (error) {
     if (createdMemberId !== null) {
-      const supabase = await createClient();
-      await supabase.from("family_members").delete().eq("id", createdMemberId);
+      await deleteApiFamilyMembers([createdMemberId]).catch(() => null);
     }
 
     return {
@@ -231,7 +152,7 @@ export async function saveFamilyMemberWithAccount(
 }
 
 export async function deleteFamilyMembers(
-  ids: number[]
+  ids: number[],
 ): Promise<{ success: boolean; error: string | null }> {
   if (ids.length === 0) {
     return { success: false, error: "没有选择要删除的成员" };
@@ -240,27 +161,14 @@ export async function deleteFamilyMembers(
   try {
     const account = await requireEditorAccount();
     assertRoleCanDelete(account.profile);
+    await deleteApiFamilyMembers(ids);
+    revalidatePath("/family-tree", "layout");
+    return { success: true, error: null };
   } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "当前账号无权操作",
-    };
+    return { success: false, error: error instanceof Error ? error.message : "删除成员失败" };
   }
-
-  const supabase = await createClient();
-
-  const { error } = await supabase
-    .from("family_members")
-    .delete()
-    .in("id", ids);
-
-  if (error) {
-    return { success: false, error: error.message };
-  }
-
-  revalidatePath("/family-tree", "layout");
-  return { success: true, error: null };
 }
+
 
 // 获取所有成员用于父亲选择下拉框
 export async function fetchAllMembersForSelect(): Promise<
@@ -268,65 +176,25 @@ export async function fetchAllMembersForSelect(): Promise<
 > {
   try {
     await requireEditorAccount();
+    return await fetchApiFamilyMemberOptions();
   } catch {
     return [];
   }
-
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("family_members")
-    .select("id, name, generation")
-    .order("generation", { ascending: true })
-    .order("name", { ascending: true });
-
-  if (error) {
-    console.error("Error fetching members for select:", error);
-    return [];
-  }
-
-  return data || [];
 }
+
 
 // 根据 ID 获取单个成员
 export async function fetchMemberById(
-  id: number
+  id: number,
 ): Promise<FamilyMember | null> {
   try {
     await requireEditorAccount();
+    return await fetchApiFamilyMemberById(id);
   } catch {
     return null;
   }
-
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("family_members")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error || !data) {
-    console.error("Error fetching member by id:", error);
-    return null;
-  }
-
-  // 如果有父亲ID，查询父亲姓名
-  let father_name: string | null = null;
-  if (data.father_id) {
-    const { data: father } = await supabase
-      .from("family_members")
-      .select("name")
-      .eq("id", data.father_id)
-      .single();
-    father_name = father?.name || null;
-  }
-
-  return {
-    ...data,
-    father_name,
-  } as FamilyMember;
 }
+
 
 export async function fetchEditableMemberById(
   id: number,
@@ -339,9 +207,7 @@ export async function fetchEditableMemberById(
       return null;
     }
 
-    const accountProfile = canManageAccounts(account.profile)
-      ? await getMemberAccountProfileForAdmin(id)
-      : null;
+    const accountProfile = account.profile.role === "admin" ? await fetchApiMemberAccount(id) : null;
 
     return {
       ...member,
@@ -367,85 +233,37 @@ export interface ImportMemberInput {
 }
 
 export async function batchCreateFamilyMembers(
-  members: ImportMemberInput[]
+  members: ImportMemberInput[],
 ): Promise<{ success: boolean; count: number; error: string | null }> {
   try {
     const account = await requireEditorAccount();
     assertRoleCanDelete(account.profile);
+    const result = await batchCreateApiFamilyMembers(members.map((member) => ({
+      name: member.name,
+      generation: member.generation ?? null,
+      sibling_order: member.sibling_order ?? null,
+      father_id: null,
+      father_name: member.father_name ?? null,
+      gender: member.gender ?? null,
+      official_position: member.official_position ?? null,
+      is_alive: member.is_alive ?? true,
+      spouse: member.spouse ?? null,
+      remarks: member.remarks ?? null,
+      birthday: member.birthday ?? null,
+      death_date: null,
+      residence_place: member.residence_place ?? null,
+    })));
+    revalidatePath("/family-tree", "layout");
+    return { success: true, count: result.data.count, error: null };
   } catch (error) {
-    return {
-      success: false,
-      count: 0,
-      error: error instanceof Error ? error.message : "当前账号无权操作",
-    };
+    return { success: false, count: 0, error: error instanceof Error ? error.message : "批量导入失败" };
   }
-
-  const supabase = await createClient();
-
-  // 1. 提取所有不为空的父亲姓名
-  const fatherNames = Array.from(
-    new Set(
-      members
-        .map((m) => m.father_name?.trim())
-        .filter((n): n is string => !!n)
-    )
-  );
-
-  // 2. 批量查找父亲 ID
-  const fatherMap: Record<string, number> = {};
-  if (fatherNames.length > 0) {
-    const { data: foundFathers } = await supabase
-      .from("family_members")
-      .select("id, name")
-      .in("name", fatherNames);
-
-    if (foundFathers) {
-      foundFathers.forEach((f) => {
-        // 注意：如果有重名，这里会覆盖，简单起见取最后一个。
-        // 实际场景可能需要更复杂的匹配逻辑（如结合世代）
-        fatherMap[f.name] = f.id;
-      });
-    }
-  }
-
-  // 3. 构建插入数据
-  const insertPayload = members.map((m) => {
-    let father_id: number | null = null;
-    if (m.father_name && fatherMap[m.father_name.trim()]) {
-      father_id = fatherMap[m.father_name.trim()];
-    }
-
-    return {
-      name: m.name,
-      generation: m.generation,
-      sibling_order: m.sibling_order,
-      father_id: father_id,
-      gender: m.gender,
-      official_position: m.official_position,
-      is_alive: m.is_alive ?? true,
-      spouse: m.spouse,
-      remarks: m.remarks,
-      birthday: m.birthday,
-      residence_place: m.residence_place,
-    };
-  });
-
-  // 4. 批量插入
-  const { error } = await supabase.from("family_members").insert(insertPayload);
-
-  if (error) {
-    return { success: false, count: 0, error: error.message };
-  }
-
-  revalidatePath("/family-tree", "layout");
-  return { success: true, count: members.length, error: null };
 }
+
 
 export async function uploadMemberAssetAction(
   formData: FormData,
 ): Promise<{ success: boolean; error: string | null }> {
-  let path = "";
-
   try {
     await requireEditorAccount();
   } catch (error) {
@@ -457,69 +275,43 @@ export async function uploadMemberAssetAction(
 
   const memberIdRaw = formData.get("memberId");
   const file = formData.get("file");
+  const assetScopeRaw = formData.get("assetScope");
   const memberId = typeof memberIdRaw === "string" ? Number(memberIdRaw) : NaN;
+  const assetScope: MemberAssetScope = assetScopeRaw === "ritual" ? "ritual" : "profile";
 
   if (!Number.isFinite(memberId)) {
     return { success: false, error: "缺少成员标识" };
   }
 
   if (!(file instanceof File) || file.size === 0) {
-    return { success: false, error: "请选择要上传的图片" };
+    return { success: false, error: assetScope === "ritual" ? "请选择要上传的祭祀附件" : "请选择要上传的图片" };
   }
 
-  if (!isImageMimeType(file.type)) {
-    return { success: false, error: "只支持上传图片文件" };
+  if (!isSupportedMemberAssetMimeType(assetScope, file.type)) {
+    return { success: false, error: assetScope === "ritual" ? "只支持上传图片或视频文件" : "只支持上传图片文件" };
   }
 
-  if (file.size > 10 * 1024 * 1024) {
+  if (isVideoMimeType(file.type) && file.size > 80 * 1024 * 1024) {
+    return { success: false, error: "视频大小不能超过 80 MB" };
+  }
+
+  if (isImageMimeType(file.type) && file.size > 10 * 1024 * 1024) {
     return { success: false, error: "图片大小不能超过 10 MB" };
   }
 
-  const supabase = await createClient();
-  const arrayBuffer = await file.arrayBuffer();
-  path = buildMemberAssetPath(memberId, file.name);
-
-  const { error: uploadError } = await supabase.storage
-    .from(MEMBER_ASSET_BUCKET)
-    .upload(path, arrayBuffer, {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (uploadError) {
-    return { success: false, error: uploadError.message };
+  try {
+    await uploadApiMemberAsset(memberId, formData);
+    revalidatePath("/family-tree", "layout");
+    revalidatePath("/family-tree/graph");
+    revalidatePath("/family-tree/graph-3d");
+    revalidatePath("/family-tree/biography-book");
+    revalidatePath("/family-tree/rituals");
+    return { success: true, error: null };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "上传附件失败" };
   }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    await supabase.storage.from(MEMBER_ASSET_BUCKET).remove([path]);
-    return { success: false, error: "登录状态已失效，请重新登录" };
-  }
-
-  const { error: insertError } = await supabase.from("member_assets").insert({
-    member_id: memberId,
-    bucket: MEMBER_ASSET_BUCKET,
-    object_path: path,
-    file_name: file.name,
-    mime_type: file.type,
-    file_size: file.size,
-    uploaded_by: user.id,
-  });
-
-  if (insertError) {
-    await supabase.storage.from(MEMBER_ASSET_BUCKET).remove([path]);
-    return { success: false, error: insertError.message };
-  }
-
-  revalidatePath("/family-tree", "layout");
-  revalidatePath("/family-tree/graph");
-  revalidatePath("/family-tree/graph-3d");
-  revalidatePath("/family-tree/biography-book");
-  return { success: true, error: null };
 }
+
 
 export async function archiveImportSourceAction(
   formData: FormData,
@@ -548,44 +340,29 @@ export async function archiveImportSourceAction(
     return { success: false, error: "导入文件大小不能超过 25 MB" };
   }
 
-  const supabase = await createClient();
-  const arrayBuffer = await file.arrayBuffer();
-  const path = buildImportArchivePath(file.name);
-
-  const { error } = await supabase.storage
-    .from(GENEALOGY_ARCHIVE_BUCKET)
-    .upload(path, arrayBuffer, {
-      contentType: file.type || "application/octet-stream",
-      upsert: false,
-    });
-
-  if (error) {
-    return { success: false, error: error.message };
+  try {
+    await archiveApiImportSource(formData);
+    return { success: true, error: null };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "归档导入文件失败" };
   }
-
-  return { success: true, error: null };
 }
+
 
 export async function fetchMembersForTimeline(): Promise<
   { id: number; name: string; birthday: string | null; death_date: string | null; generation: number | null }[]
 > {
   try {
     await requireApprovedAccount();
+    const { items } = await fetchApiFamilyMembers();
+    return items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      birthday: item.birthday,
+      death_date: item.death_date,
+      generation: item.generation,
+    }));
   } catch {
     return [];
   }
-
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("family_members")
-    .select("id, name, birthday, death_date, generation")
-    .order("birthday", { ascending: true });
-
-  if (error) {
-    console.error("Error fetching timeline data:", error);
-    return [];
-  }
-
-  return data || [];
 }

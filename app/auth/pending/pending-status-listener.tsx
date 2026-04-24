@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { isGoApiClientEnabled } from "@/lib/api/client";
 
 export function PendingStatusListener({
   profileId,
@@ -14,35 +14,39 @@ export function PendingStatusListener({
   const router = useRouter();
 
   useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase.channel(`pending-status:${profileId}`);
+    if (!isGoApiClientEnabled()) {
+      return;
+    }
 
-    channel.on(
-      "postgres_changes",
-      {
-        event: "UPDATE",
-        schema: "public",
-        table: "account_profiles",
-        filter: `id=eq.${profileId}`,
-      },
-      (payload) => {
-        const nextStatus = payload.new?.status;
-
-        if (nextStatus === "approved") {
-          router.push(homePath);
-          router.refresh();
-          return;
-        }
-
+    const refreshByStatus = (nextStatus?: unknown) => {
+      if (nextStatus === "approved") {
+        router.push(homePath);
         router.refresh();
-      },
-    );
+        return;
+      }
 
-    channel.subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
+      router.refresh();
     };
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    const source = new EventSource(new URL("/api/events", baseUrl).toString(), {
+      withCredentials: true,
+    });
+
+    source.addEventListener("account-status", (event) => {
+      try {
+        const data = JSON.parse(event.data) as { profileId?: string; status?: string };
+        if (!data.profileId || data.profileId === profileId) {
+          refreshByStatus(data.status);
+        }
+      } catch {
+        router.refresh();
+      }
+    });
+
+    source.addEventListener("notice", () => router.refresh());
+
+    return () => source.close();
   }, [homePath, profileId, router]);
 
   return null;

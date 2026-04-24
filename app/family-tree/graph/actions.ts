@@ -1,7 +1,7 @@
 "use server";
 
 import { requireApprovedAccount } from "@/lib/account/server";
-import { createClient } from "@/lib/supabase/server";
+import { fetchApiFamilyMembers } from "@/lib/api/family";
 
 export interface FamilyMemberNode {
   id: number;
@@ -34,17 +34,10 @@ export async function fetchAllFamilyMembers(): Promise<FetchGraphResult> {
     };
   }
 
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("family_members")
-    .select("id, name, generation, sibling_order, father_id, gender, official_position, is_alive, spouse, remarks, birthday, death_date, residence_place")
-    .order("generation", { ascending: true })
-    .order("sibling_order", { ascending: true });
-
-  if (error) {
-    return { data: [], error: error.message };
+  try {
+    const { items } = await fetchApiFamilyMembers();
+    return { data: items, error: null };
+  } catch (error) {
+    return { data: [], error: error instanceof Error ? error.message : "读取族谱失败" };
   }
-
-  return { data: data || [], error: null };
 }

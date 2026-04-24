@@ -161,6 +161,14 @@ export function canReviewMemberChanges(profile: Pick<AccountProfile, "role" | "s
   return isApprovedAccount(profile) && (isAdminRole(profile) || isEditorRole(profile));
 }
 
+export function canViewRituals(profile: Pick<AccountProfile, "status">) {
+  return isApprovedAccount(profile);
+}
+
+export function canEditRituals(profile: Pick<AccountProfile, "role" | "status">) {
+  return canManageFamilyMembers(profile);
+}
+
 export function canSubmitOwnDraft(profile: Pick<AccountProfile, "role" | "status" | "member_id">) {
   return isApprovedAccount(profile) && profile.role === "member" && profile.member_id !== null;
 }

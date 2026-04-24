@@ -1,7 +1,12 @@
 import "server-only";
 
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  fetchApiBackofficeNoticeCounts,
+  fetchApiMemberOptionsForAdmin,
+  fetchApiPendingAccounts,
+} from "@/lib/api/account";
+import { apiFetch } from "@/lib/api/server";
+import type { ApiFamilyMember } from "@/lib/api/types";
 import {
   EMPTY_BACKOFFICE_NOTICE_COUNTS,
   canDeleteFamilyMembers,
@@ -32,98 +37,32 @@ export interface BackofficeNavItem {
   label: string;
 }
 
-interface IdentityAuthUser {
-  id: string;
-  email: string | null;
-}
-
 export async function getAccountProfileByAuthUserId(authUserId: string) {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("account_profiles")
-    .select("*")
-    .eq("auth_user_id", authUserId)
-    .maybeSingle<AccountProfile>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return apiFetch<AccountProfile | null>(`/api/accounts/by-auth-user/${authUserId}`, { cache: "no-store" });
 }
 
 export async function findAccountProfileByHashForAdmin(idCardHash: string) {
-  const adminClient = createAdminClient();
-  const { data, error } = await adminClient
-    .from("account_profiles")
-    .select("*")
-    .eq("id_card_hash", idCardHash)
-    .maybeSingle<AccountProfile>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return apiFetch<AccountProfile | null>(`/api/admin/accounts/by-id-card-hash/${idCardHash}`, { cache: "no-store" });
 }
 
 export async function findAccountProfileForLoginByAdmin(realName: string, idCard: string) {
-  const adminClient = createAdminClient();
-  const { data, error } = await adminClient
-    .from("account_profiles")
-    .select("*")
-    .eq("real_name_normalized", normalizeRealName(realName))
-    .eq("id_card_hash", hashIdCard(idCard))
-    .maybeSingle<AccountProfile>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return apiFetch<AccountProfile | null>("/api/admin/accounts/login-profile", {
+    method: "POST",
+    body: { realName, idCard },
+  });
 }
 
-export async function findInternalAuthUserByEmailForAdmin(email: string) {
-  const adminClient = createAdminClient();
-  let page = 1;
-
-  while (true) {
-    const { data, error } = await adminClient.auth.admin.listUsers({
-      page,
-      perPage: 200,
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    const matchedUser = (data.users as IdentityAuthUser[]).find(
-      (user) => user.email?.toLowerCase() === email.toLowerCase(),
-    );
-
-    if (matchedUser) {
-      return matchedUser;
-    }
-
-    if (!data.nextPage || data.users.length === 0) {
-      return null;
-    }
-
-    page = data.nextPage;
-  }
+export async function findInternalAuthUserByEmailForAdmin(_email: string) {
+  return null;
 }
 
 export async function getCurrentAccountProfile() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  try {
+    const account = await apiFetch<{ profile: AccountProfile }>("/api/auth/me", { cache: "no-store" });
+    return account.profile;
+  } catch {
     return null;
   }
-
-  return getAccountProfileByAuthUserId(user.id);
 }
 
 export async function findAccountProfileForLogin(realName: string, idCard: string) {
@@ -131,22 +70,13 @@ export async function findAccountProfileForLogin(realName: string, idCard: strin
 }
 
 export async function requireSignedInAccount() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const profile = await getCurrentAccountProfile();
 
-  if (!user) {
+  if (!profile) {
     throw new Error("请先登录");
   }
 
-  const profile = await getAccountProfileByAuthUserId(user.id);
-
-  if (!profile) {
-    throw new Error("账号资料不存在");
-  }
-
-  return { supabase, user, profile };
+  return { user: { id: profile.auth_user_id }, profile };
 }
 
 export async function requireApprovedAccount() {
@@ -200,38 +130,21 @@ export async function requireDraftOwnerAccount() {
 }
 
 export async function listPendingAccounts() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("account_profiles")
-    .select("*")
-    .eq("status", "pending")
-    .order("created_at", { ascending: true })
-    .returns<AccountProfile[]>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data ?? [];
+  return fetchApiPendingAccounts();
 }
 
 export async function getBackofficeNoticeCounts(
   profile: Pick<AccountProfile, "role" | "status"> | null,
 ): Promise<BackofficeNoticeCounts> {
-  if (!profile) {
+  if (!profile || !canReviewMemberChanges(profile)) {
     return EMPTY_BACKOFFICE_NOTICE_COUNTS;
   }
 
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .rpc("app_get_backoffice_notice_counts")
-    .single<BackofficeNoticeCounts>();
-
-  if (error) {
-    throw new Error(error.message);
+  try {
+    return await fetchApiBackofficeNoticeCounts();
+  } catch {
+    return EMPTY_BACKOFFICE_NOTICE_COUNTS;
   }
-
-  return data ?? EMPTY_BACKOFFICE_NOTICE_COUNTS;
 }
 
 export function getBackofficeNavItems(
@@ -259,34 +172,11 @@ export function getBackofficeNavItems(
 }
 
 export async function listFamilyMemberOptions() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("family_members")
-    .select("id, name, generation")
-    .order("generation", { ascending: true })
-    .order("sibling_order", { ascending: true })
-    .returns<FamilyMemberOption[]>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data ?? [];
+  return fetchApiMemberOptionsForAdmin();
 }
 
 export async function getFamilyMemberById(memberId: number) {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("family_members")
-    .select("*")
-    .eq("id", memberId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data;
+  return apiFetch<ApiFamilyMember | null>(`/api/family-members/${memberId}`, { cache: "no-store" });
 }
 
 export async function getBoundMemberForCurrentAccount() {

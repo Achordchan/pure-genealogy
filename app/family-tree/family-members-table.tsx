@@ -41,10 +41,13 @@ import {
 } from "./actions";
 import { ImportMembersDialog } from "./import-members-dialog";
 import { MemberAssetsPanel } from "./member-assets-panel";
+import { RitualEditDialog } from "./ritual-edit-dialog";
+import { fetchMemberRitualForEdit } from "./ritual-actions";
 import { FatherCombobox } from "./father-combobox";
 import { RichTextEditor } from "@/components/rich-text/editor";
 import { RichTextViewer } from "@/components/rich-text/viewer";
 import { cn } from "@/lib/utils";
+import { formatRitualLocation, type MemberRitual } from "@/lib/rituals/shared";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { AppDialogShell } from "@/components/app-dialog-shell";
@@ -78,6 +81,7 @@ export function FamilyMembersTable({
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [searchInput, setSearchInput] = React.useState(searchQuery);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const [isRitualDialogOpen, setIsRitualDialogOpen] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isLoadingParents, setIsLoadingParents] = React.useState(false);
   const [loadingFatherId, setLoadingFatherId] = React.useState<number | null>(null);
@@ -87,6 +91,7 @@ export function FamilyMembersTable({
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const [editingMember, setEditingMember] = React.useState<FamilyMember | null>(null);
+  const [ritualSnapshot, setRitualSnapshot] = React.useState<MemberRitual | null>(null);
   const [biographyMember, setBiographyMember] = React.useState<FamilyMember | null>(null);
   const [pendingSavePayload, setPendingSavePayload] = React.useState<Parameters<typeof saveFamilyMemberWithAccount>[0] | null>(null);
   const [parentOptions, setParentOptions] = React.useState<
@@ -203,9 +208,11 @@ export function FamilyMembersTable({
       currentRole: "",
     });
     setEditingMember(null);
+    setRitualSnapshot(null);
     setIsLoadingMemberDetail(false);
     setFormError(null);
     setPendingSavePayload(null);
+    setIsRitualDialogOpen(false);
   };
 
   const fillMemberForm = (member: FamilyMember) => {
@@ -237,28 +244,26 @@ export function FamilyMembersTable({
     resetForm();
     fillMemberForm(member);
     setIsDialogOpen(true);
-
-    if (!canManageAccounts) {
-      return;
-    }
-
     setIsLoadingMemberDetail(true);
-    const detail = await fetchEditableMemberById(member.id);
+    const [detail, ritualDetail] = await Promise.all([
+      canManageAccounts ? fetchEditableMemberById(member.id) : Promise.resolve(null),
+      !member.is_alive ? fetchMemberRitualForEdit(member.id).catch(() => null) : Promise.resolve(null),
+    ]);
     setIsLoadingMemberDetail(false);
 
-    if (!detail) {
-      return;
-    }
+    setRitualSnapshot(ritualDetail?.ritual ?? null);
 
-    fillMemberForm(detail);
-    setAccountForm({
-      idCard: detail.account_profile?.id_card_value ?? "",
-      phone: detail.account_profile?.phone ?? "",
-      accountRole:
-        detail.account_profile?.role === "editor" ? "editor" : "member",
-      hasAccount: Boolean(detail.account_profile),
-      currentRole: detail.account_profile?.role ?? "",
-    });
+    if (detail) {
+      fillMemberForm(detail);
+      setAccountForm({
+        idCard: detail.account_profile?.id_card_value ?? "",
+        phone: detail.account_profile?.phone ?? "",
+        accountRole:
+          detail.account_profile?.role === "editor" ? "editor" : "member",
+        hasAccount: Boolean(detail.account_profile),
+        currentRole: detail.account_profile?.role ?? "",
+      });
+    }
   };
 
   // 关闭弹窗
@@ -617,6 +622,38 @@ export function FamilyMembersTable({
                     </div>
                   )}
 
+                  {isEditMode && editingMember && (!formData.is_alive || ritualSnapshot) ? (
+                    <div className={memberFormTopRowClass}>
+                      <Label className={`${memberFormLabelClass} pt-2`}>祭祀信息</Label>
+                      <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              {ritualSnapshot ? "已配置祭祀资料" : "尚未配置祭祀资料"}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {ritualSnapshot
+                                ? formatRitualLocation(ritualSnapshot)
+                                : "可补充墓位、地图导航、图片/视频指引和祭扫说明。"}
+                            </p>
+                            {formData.is_alive ? (
+                              <p className="text-xs text-amber-600">
+                                当前表单里该成员被标记为在世，前台将隐藏祭祀入口。
+                              </p>
+                            ) : null}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsRitualDialogOpen(true)}
+                          >
+                            {ritualSnapshot ? "编辑祭祀信息" : "新增祭祀信息"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {/* 配偶 */}
                   <div className={memberFormRowClass}>
                     <Label htmlFor="spouse" className={memberFormLabelClass}>
@@ -964,6 +1001,18 @@ export function FamilyMembersTable({
         isPending={isDeleting}
         onConfirm={handleConfirmDelete}
       />
+
+      {editingMember ? (
+        <RitualEditDialog
+          open={isRitualDialogOpen}
+          onOpenChange={setIsRitualDialogOpen}
+          memberId={editingMember.id}
+          memberName={formData.name || editingMember.name}
+          memberIsAlive={formData.is_alive}
+          initialRitual={ritualSnapshot}
+          onSaved={setRitualSnapshot}
+        />
+      ) : null}
       <ConfirmActionDialog
         open={isAccountResetConfirmOpen}
         onOpenChange={setIsAccountResetConfirmOpen}
