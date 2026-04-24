@@ -10,7 +10,6 @@ import {
   updateApiPendingAccount,
   updateApiProfilePhone,
 } from "@/lib/api/account";
-import { apiFetch } from "@/lib/api/server";
 import {
   getAccountRedirectPath,
   getCurrentAccountProfile,
@@ -19,7 +18,6 @@ import {
 } from "@/lib/account/server";
 import {
   normalizeAccountRole,
-  type AccountProfile,
   validateIdCard,
   validateRealName,
 } from "@/lib/account/shared";
@@ -44,30 +42,6 @@ function validateIdentityForm(realName: string, idCard: string) {
   const idCardError = validateIdCard(idCard);
   if (idCardError) return idCardError;
   return null;
-}
-
-export async function loginWithIdentityAction(
-  _: AuthFormState,
-  formData: FormData,
-): Promise<AuthFormState> {
-  try {
-    const realName = getFieldValue(formData, "realName");
-    const idCard = getFieldValue(formData, "idCard");
-    const validationError = validateIdentityForm(realName, idCard);
-
-    if (validationError) {
-      return { error: validationError };
-    }
-
-    const response = await apiFetch<{ profile: AccountProfile }>("/api/auth/login", {
-      method: "POST",
-      body: { realName, idCard },
-    });
-    redirect(getAccountRedirectPath(response.profile));
-  } catch (error) {
-    if (isRedirectError(error)) throw error;
-    return { error: error instanceof Error ? error.message : "登录失败，请稍后重试" };
-  }
 }
 
 export async function signUpWithIdentityAction(

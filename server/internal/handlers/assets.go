@@ -153,7 +153,13 @@ func (h *AssetHandler) Download(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.FileAttachment(filepath.Join(h.cfg.StorageRoot, asset.Bucket, filepath.FromSlash(asset.ObjectPath)), asset.FileName)
+	fullPath := filepath.Join(h.cfg.StorageRoot, asset.Bucket, filepath.FromSlash(asset.ObjectPath))
+	if _, err := os.Stat(fullPath); err != nil {
+		httpx.Abort(c, http.StatusNotFound, "asset_file_not_found", "附件文件不存在")
+		return
+	}
+	c.Header("Content-Disposition", "inline; filename=\""+asset.FileName+"\"")
+	c.File(fullPath)
 }
 
 func (h *AssetHandler) Delete(c *gin.Context) {

@@ -12,13 +12,16 @@ export function buildClientApiUrl(path: string) {
 }
 
 export async function clientApiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+
+  if (!(options.body instanceof FormData) && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
   const response = await fetch(buildClientApiUrl(path), {
     ...options,
     credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {

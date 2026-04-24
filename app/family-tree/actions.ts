@@ -9,8 +9,6 @@ import {
   fetchApiFamilyMembersPage,
   fetchApiMemberAccount,
   saveApiFamilyMember,
-  uploadApiMemberAsset,
-  archiveApiImportSource,
 } from "@/lib/api/family";
 import {
   assertRoleCanDelete,
@@ -257,94 +255,6 @@ export async function batchCreateFamilyMembers(
     return { success: true, count: result.data.count, error: null };
   } catch (error) {
     return { success: false, count: 0, error: error instanceof Error ? error.message : "批量导入失败" };
-  }
-}
-
-
-export async function uploadMemberAssetAction(
-  formData: FormData,
-): Promise<{ success: boolean; error: string | null }> {
-  try {
-    await requireEditorAccount();
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "当前账号无权上传成员资料",
-    };
-  }
-
-  const memberIdRaw = formData.get("memberId");
-  const file = formData.get("file");
-  const assetScopeRaw = formData.get("assetScope");
-  const memberId = typeof memberIdRaw === "string" ? Number(memberIdRaw) : NaN;
-  const assetScope: MemberAssetScope = assetScopeRaw === "ritual" ? "ritual" : "profile";
-
-  if (!Number.isFinite(memberId)) {
-    return { success: false, error: "缺少成员标识" };
-  }
-
-  if (!(file instanceof File) || file.size === 0) {
-    return { success: false, error: assetScope === "ritual" ? "请选择要上传的祭祀附件" : "请选择要上传的图片" };
-  }
-
-  if (!isSupportedMemberAssetMimeType(assetScope, file.type)) {
-    return { success: false, error: assetScope === "ritual" ? "只支持上传图片或视频文件" : "只支持上传图片文件" };
-  }
-
-  if (isVideoMimeType(file.type) && file.size > 80 * 1024 * 1024) {
-    return { success: false, error: "视频大小不能超过 80 MB" };
-  }
-
-  if (isImageMimeType(file.type) && file.size > 10 * 1024 * 1024) {
-    return { success: false, error: "图片大小不能超过 10 MB" };
-  }
-
-  try {
-    await uploadApiMemberAsset(memberId, formData);
-    revalidatePath("/family-tree", "layout");
-    revalidatePath("/family-tree/graph");
-    revalidatePath("/family-tree/graph-3d");
-    revalidatePath("/family-tree/biography-book");
-    revalidatePath("/family-tree/rituals");
-    return { success: true, error: null };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : "上传附件失败" };
-  }
-}
-
-
-export async function archiveImportSourceAction(
-  formData: FormData,
-): Promise<{ success: boolean; error: string | null }> {
-  try {
-    const account = await requireEditorAccount();
-    assertRoleCanDelete(account.profile);
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "当前账号无权归档导入文件",
-    };
-  }
-
-  const file = formData.get("file");
-
-  if (!(file instanceof File) || file.size === 0) {
-    return { success: false, error: "缺少导入文件" };
-  }
-
-  if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
-    return { success: false, error: "只支持归档 Excel 或 CSV 导入文件" };
-  }
-
-  if (file.size > 25 * 1024 * 1024) {
-    return { success: false, error: "导入文件大小不能超过 25 MB" };
-  }
-
-  try {
-    await archiveApiImportSource(formData);
-    return { success: true, error: null };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : "归档导入文件失败" };
   }
 }
 

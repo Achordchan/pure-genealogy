@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Film, ImageIcon, Loader2, Upload } from "lucide-react";
+import { Eye, Film, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   type MemberAsset,
@@ -10,7 +10,6 @@ import {
   isSupportedMemberAssetMimeType,
   isVideoMimeType,
 } from "@/lib/storage/shared";
-import { uploadMemberAssetAction } from "./actions";
 import { buildClientApiUrl, clientApiFetch } from "@/lib/api/client";
 import type { ApiMemberAsset } from "@/lib/api/types";
 
@@ -42,6 +41,7 @@ export function MemberAssetsPanel({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -100,13 +100,16 @@ export function MemberAssetsPanel({
     startTransition(async () => {
       setError(null);
       const formData = new FormData();
-      formData.append("memberId", String(memberId));
       formData.append("assetScope", assetScope);
       formData.append("file", selectedFile);
-      const result = await uploadMemberAssetAction(formData);
 
-      if (!result.success) {
-        setError(result.error);
+      try {
+        await clientApiFetch(`/api/members/${memberId}/assets`, {
+          method: "POST",
+          body: formData,
+        });
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "上传附件失败");
         return;
       }
 
@@ -117,6 +120,26 @@ export function MemberAssetsPanel({
       reloadAssets();
     });
   };
+
+  const handleDelete = (asset: DisplayMemberAsset) => {
+    const confirmed = window.confirm(`确认删除附件“${asset.file_name}”？`);
+    if (!confirmed) return;
+
+    setDeletingAssetId(asset.id);
+    setError(null);
+    clientApiFetch(`/api/assets/${asset.id}`, { method: "DELETE" })
+      .then(() => {
+        setAssets((current) => current.filter((item) => item.id !== asset.id));
+      })
+      .catch((error) => {
+        setError(error instanceof Error ? error.message : "删除附件失败");
+      })
+      .finally(() => setDeletingAssetId(null));
+  };
+
+  if (!canUpload && !isLoading && !error && assets.length === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
@@ -196,9 +219,32 @@ export function MemberAssetsPanel({
               <div className="space-y-1 p-3">
                 <p className="line-clamp-2 text-sm font-medium">{asset.file_name}</p>
                 <p className="text-xs text-muted-foreground">{formatDate(asset.created_at)}</p>
-                <a href={asset.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
-                  {isVideoMimeType(asset.mime_type) ? "查看原视频" : "查看原图"}
-                </a>
+                <div className="flex items-center gap-1">
+                  <a
+                    href={asset.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"
+                    aria-label={isVideoMimeType(asset.mime_type) ? "查看原视频" : "查看原图"}
+                    title={isVideoMimeType(asset.mime_type) ? "查看原视频" : "查看原图"}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </a>
+                  {canUpload ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700"
+                      disabled={deletingAssetId === asset.id}
+                      onClick={() => handleDelete(asset)}
+                      aria-label="删除附件"
+                      title="删除附件"
+                    >
+                      {deletingAssetId === asset.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
           ))}

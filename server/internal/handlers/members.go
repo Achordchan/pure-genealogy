@@ -48,6 +48,25 @@ func (h *MemberHandler) All(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h *MemberHandler) Options(c *gin.Context) {
+	items, err := h.repo.ListMembers(c.Request.Context())
+	if err != nil {
+		httpx.Abort(c, http.StatusInternalServerError, "members_failed", "读取成员失败")
+		return
+	}
+
+	options := make([]gin.H, 0, len(items))
+	for _, item := range items {
+		options = append(options, gin.H{
+			"id":         item.ID,
+			"name":       item.Name,
+			"generation": item.Generation,
+		})
+	}
+
+	c.JSON(http.StatusOK, options)
+}
+
 func (h *MemberHandler) Get(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {

@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { cn, FAMILY_SURNAME } from "@/lib/utils";
 import type { BiographyMember } from "./actions";
 import { RichTextViewer } from "@/components/rich-text/viewer";
+import { formatDateOnly } from "@/lib/date-format";
 
 interface BiographyBookProps {
     members: BiographyMember[];
@@ -202,11 +203,7 @@ export function BiographyBook({ members }: BiographyBookProps) {
 
     const totalPages = members.length;
 
-    const formatDate = useCallback((dateStr: string | null) => {
-        if (!dateStr) return "-";
-        const [y, m, d] = dateStr.split("-");
-        return `${y}年${m}月${d}日`;
-    }, []);
+    const formatDate = useCallback(formatDateOnly, []);
 
     // 搜索结果
     const searchResults = useMemo(() => {

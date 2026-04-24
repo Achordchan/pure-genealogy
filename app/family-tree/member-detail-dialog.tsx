@@ -14,6 +14,7 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { MemberAssetsPanel } from "./member-assets-panel";
+import { formatDateOnly } from "@/lib/date-format";
 
 interface MemberDetailDialogProps {
   isOpen: boolean;
@@ -38,12 +39,6 @@ export function MemberDetailDialog({
   }, [isOpen, member]);
 
   if (!member) return null;
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "-";
-    const [y, m, d] = dateStr.split("-");
-    return `${y}年${m}月${d}日`;
-  };
 
   return (
     <Dialog modal={true} open={isOpen} onOpenChange={onOpenChange}>
@@ -144,12 +139,12 @@ export function MemberDetailDialog({
                     <div className="grid grid-cols-2 gap-4 sm:gap-6">
                       <div className="space-y-1">
                         <span className="text-[10px] sm:text-xs font-bold text-stone-400 dark:text-stone-500 uppercase tracking-wider">生辰</span>
-                        <p className="text-base sm:text-lg text-stone-700 dark:text-stone-300">{formatDate(member.birthday)}</p>
+                        <p className="text-base sm:text-lg text-stone-700 dark:text-stone-300">{formatDateOnly(member.birthday)}</p>
                       </div>
                       {!member.is_alive && (
                         <div className="space-y-1">
                           <span className="text-[10px] sm:text-xs font-bold text-stone-400 dark:text-stone-500 uppercase tracking-wider">卒年</span>
-                          <p className="text-base sm:text-lg text-stone-700 dark:text-stone-300">{formatDate(member.death_date)}</p>
+                          <p className="text-base sm:text-lg text-stone-700 dark:text-stone-300">{formatDateOnly(member.death_date)}</p>
                         </div>
                       )}
                     </div>

@@ -20,12 +20,12 @@ import { Input } from "@/components/ui/input";
 import { Upload, Download, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
-  archiveImportSourceAction,
   batchCreateFamilyMembers,
   type ImportMemberInput,
 } from "./actions";
 import { FAMILY_SURNAME } from "@/lib/utils";
 import { AppDialogShell } from "@/components/app-dialog-shell";
+import { clientApiFetch } from "@/lib/api/client";
 
 interface ImportMembersDialogProps {
   onSuccess?: () => void;
@@ -140,11 +140,15 @@ export function ImportMembersDialog({ onSuccess }: ImportMembersDialogProps) {
     setIsLoading(true);
     const archiveFormData = new FormData();
     archiveFormData.append("file", selectedFile);
-    const archiveResult = await archiveImportSourceAction(archiveFormData);
 
-    if (!archiveResult.success) {
+    try {
+      await clientApiFetch("/api/imports/archive", {
+        method: "POST",
+        body: archiveFormData,
+      });
+    } catch (error) {
       setIsLoading(false);
-      setError(`归档失败: ${archiveResult.error}`);
+      setError(`归档失败: ${error instanceof Error ? error.message : "归档导入文件失败"}`);
       return;
     }
 

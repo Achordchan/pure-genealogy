@@ -51,6 +51,7 @@ import { formatRitualLocation, type MemberRitual } from "@/lib/rituals/shared";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { AppDialogShell } from "@/components/app-dialog-shell";
+import { formatDateOnly } from "@/lib/date-format";
 
 interface FamilyMembersTableProps {
   initialData: FamilyMember[];
@@ -911,22 +912,8 @@ export function FamilyMembersTable({
                     )}
                   </TableCell>
                   <TableCell>{member.gender ?? "-"}</TableCell>
-                  <TableCell>
-                    {member.birthday
-                      ? (() => {
-                          const [y, m, d] = member.birthday.split("-");
-                          return `${y}年${m}月${d}日`;
-                        })()
-                      : "-"}
-                  </TableCell>
-                  <TableCell>
-                    {member.death_date
-                      ? (() => {
-                          const [y, m, d] = member.death_date.split("-");
-                          return `${y}年${m}月${d}日`;
-                        })()
-                      : "-"}
-                  </TableCell>
+                  <TableCell>{formatDateOnly(member.birthday)}</TableCell>
+                  <TableCell>{formatDateOnly(member.death_date)}</TableCell>
                   <TableCell>{member.residence_place ?? "-"}</TableCell>
                   <TableCell>{member.official_position ?? "-"}</TableCell>
                   <TableCell>{member.is_alive ? "是" : "否"}</TableCell>

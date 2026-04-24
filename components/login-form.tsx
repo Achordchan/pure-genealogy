@@ -1,8 +1,9 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { loginWithIdentityAction } from "@/app/auth/actions";
 import type { AuthFormState } from "@/app/auth/actions";
+import { clientApiFetch } from "@/lib/api/client";
+import { getAccountHomePath, validateIdCard, validateRealName, type AccountProfile } from "@/lib/account/shared";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,19 +16,43 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export function LoginForm({
   className,
   ...props
 }: React.ComponentPropsWithoutRef<"div">) {
-  const initialState: AuthFormState = { error: null };
-  const [state, formAction, isPending] = useActionState(
-    loginWithIdentityAction,
-    initialState,
-  );
+  const router = useRouter();
+  const [state, setState] = useState<AuthFormState>({ error: null });
+  const [isPending, setIsPending] = useState(false);
   const [realName, setRealName] = useState("");
   const [idCard, setIdCard] = useState("");
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const validationError = validateRealName(realName) ?? validateIdCard(idCard);
+
+    if (validationError) {
+      setState({ error: validationError });
+      return;
+    }
+
+    setIsPending(true);
+    setState({ error: null });
+
+    try {
+      const response = await clientApiFetch<{ profile: AccountProfile }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ realName, idCard }),
+      });
+      router.replace(getAccountHomePath(response.profile));
+      router.refresh();
+    } catch (error) {
+      setState({ error: error instanceof Error ? error.message : "登录失败，请稍后重试" });
+      setIsPending(false);
+    }
+  };
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -37,7 +62,7 @@ export function LoginForm({
           <CardDescription>请输入姓名和身份证号登录系统</CardDescription>
         </CardHeader>
         <CardContent>
-          <form action={formAction}>
+          <form onSubmit={handleSubmit}>
             <div className="flex flex-col gap-6">
               <div className="grid gap-2">
                 <Label htmlFor="realName">姓名</Label>

@@ -107,17 +107,3 @@ export function fetchApiMemberAssets(memberId: number, assetScope: "profile" | "
     query: { assetScope },
   });
 }
-
-export function uploadApiMemberAsset(memberId: number, formData: FormData) {
-  return apiFetch<{ asset: ApiMemberAsset }>(`/api/members/${memberId}/assets`, {
-    method: "POST",
-    body: formData,
-  });
-}
-
-export function archiveApiImportSource(formData: FormData) {
-  return apiFetch<{ path: string }>("/api/imports/archive", {
-    method: "POST",
-    body: formData,
-  });
-}
